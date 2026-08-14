@@ -49,7 +49,7 @@ export default function LoginPage() {
           Don&apos;t have an account?{' '}
           <Link
             to="/signup"
-            className="font-semibold text-brand-700 hover:underline dark:text-brand-400"
+            className="font-semibold text-brand-700 hover:underline dark:text-brand-300"
           >
             Sign up
           </Link>

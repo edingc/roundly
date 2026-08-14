@@ -104,6 +104,41 @@ func (q *Queries) GetTee(ctx context.Context, id string) (Tee, error) {
 	return i, err
 }
 
+const getTeeByName = `-- name: GetTeeByName :one
+SELECT id, course_id, name, color, course_rating_men, slope_rating_men, total_yardage, display_order, course_rating_women, slope_rating_women, front9_course_rating_men, front9_slope_rating_men, back9_course_rating_men, back9_slope_rating_men, front9_course_rating_women, front9_slope_rating_women, back9_course_rating_women, back9_slope_rating_women FROM tees WHERE course_id = ? AND name = ?
+`
+
+type GetTeeByNameParams struct {
+	CourseID string
+	Name     string
+}
+
+func (q *Queries) GetTeeByName(ctx context.Context, arg GetTeeByNameParams) (Tee, error) {
+	row := q.db.QueryRowContext(ctx, getTeeByName, arg.CourseID, arg.Name)
+	var i Tee
+	err := row.Scan(
+		&i.ID,
+		&i.CourseID,
+		&i.Name,
+		&i.Color,
+		&i.CourseRatingMen,
+		&i.SlopeRatingMen,
+		&i.TotalYardage,
+		&i.DisplayOrder,
+		&i.CourseRatingWomen,
+		&i.SlopeRatingWomen,
+		&i.Front9CourseRatingMen,
+		&i.Front9SlopeRatingMen,
+		&i.Back9CourseRatingMen,
+		&i.Back9SlopeRatingMen,
+		&i.Front9CourseRatingWomen,
+		&i.Front9SlopeRatingWomen,
+		&i.Back9CourseRatingWomen,
+		&i.Back9SlopeRatingWomen,
+	)
+	return i, err
+}
+
 const listTeesByCourse = `-- name: ListTeesByCourse :many
 SELECT id, course_id, name, color, course_rating_men, slope_rating_men, total_yardage, display_order, course_rating_women, slope_rating_women, front9_course_rating_men, front9_slope_rating_men, back9_course_rating_men, back9_slope_rating_men, front9_course_rating_women, front9_slope_rating_women, back9_course_rating_women, back9_slope_rating_women FROM tees WHERE course_id = ? ORDER BY display_order ASC, name COLLATE NOCASE ASC
 `

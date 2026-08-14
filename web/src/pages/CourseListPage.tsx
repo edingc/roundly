@@ -171,7 +171,7 @@ export default function CourseListPage() {
             <li key={course.id}>
               <Link
                 to={`/courses/${course.id}`}
-                className="card block h-full p-4 transition-colors hover:border-brand-400 hover:bg-brand-50/50 dark:hover:border-brand-600 dark:hover:bg-brand-950/30"
+                className="card block h-full p-4 transition-colors hover:border-brand-400 hover:bg-brand-50/50 dark:hover:border-brand-400 dark:hover:bg-brand-950/30"
               >
                 <div className="flex items-start gap-2">
                   <h2 className="font-semibold">{course.name}</h2>

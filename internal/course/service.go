@@ -158,6 +158,7 @@ type CreateCourseInput struct {
 	Name    string
 	Address *string
 	Phone   *string
+	Website *string
 	// HoleCount pre-creates holes 1..HoleCount so the par/yardage grid is
 	// immediately usable. Zero means DefaultHoleCount.
 	HoleCount int
@@ -200,6 +201,7 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 			Name:      strings.TrimSpace(in.Name),
 			Address:   normalizeOptional(in.Address),
 			Phone:     normalizeOptional(in.Phone),
+			Website:   normalizeOptional(in.Website),
 			CreatedBy: creatorID,
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -211,10 +213,8 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 			if err := q.CreateHole(ctx, sqlc.CreateHoleParams{
 				ID:         id.New(),
 				CourseID:   courseID,
-				HoleNumber: int64(n),
-				// Stroke index defaults to the hole number, which is a sensible
-				// placeholder the user can correct on the detail screen.
-				HandicapIndex: int64Ptr(int64(n)),
+				HoleNumber:    int64(n),
+				HandicapIndex: nil,
 			}); err != nil {
 				return fmt.Errorf("insert hole %d: %w", n, err)
 			}
@@ -260,52 +260,159 @@ type ImportHoleInput struct {
 }
 
 // ImportCourseInput is the payload for recreating a course, its tees, and its
-// holes from data produced by Export.
+// holes from data produced by Export. If ID is set and the importer owns a
+// course with that ID, the existing course is updated in place.
 type ImportCourseInput struct {
+	ID      string
 	Name    string
 	Address *string
 	Phone   *string
+	Website *string
 	Tees    []TeeInput
 	Holes   []ImportHoleInput
 }
 
-// Import recreates a course, its tees, and its holes (with par and yardage)
-// from data produced by Export, in one transaction so a partial import is
-// never visible. Hole tee details reference tees by name rather than ID,
-// since IDs are not stable across app instances — an export from one
-// instance has to be able to land in another.
+// Import recreates or updates a course, its tees, and its holes (with par
+// and yardage) from data produced by Export, in one transaction so a partial
+// import is never visible. If the input contains a course ID that the
+// importer owns, the existing course is updated; otherwise a new course is
+// created. Hole tee details reference tees by name rather than ID, since IDs
+// are not stable across app instances.
 func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseInput) (*CourseDetail, error) {
+	// Decide whether to update an existing course or create a new one.
 	courseID := id.New()
+	update := false
+	if in.ID != "" {
+		existing, err := s.db.Queries.GetCourse(ctx, in.ID)
+		if err == nil && existing.CreatedBy == creatorID {
+			courseID = existing.ID
+			update = true
+		}
+		// If the course doesn't exist or belongs to someone else, fall
+		// through to create with a fresh ID.
+	}
+
 	now := timex.Now()
 
 	err := s.db.InTx(func(q *sqlc.Queries) error {
-		if err := q.CreateCourse(ctx, sqlc.CreateCourseParams{
-			ID:        courseID,
-			Name:      strings.TrimSpace(in.Name),
-			Address:   normalizeOptional(in.Address),
-			Phone:     normalizeOptional(in.Phone),
-			CreatedBy: creatorID,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}); err != nil {
-			return fmt.Errorf("insert course: %w", err)
+		if update {
+			if err := q.UpdateCourse(ctx, sqlc.UpdateCourseParams{
+				Name:      strings.TrimSpace(in.Name),
+				Address:   normalizeOptional(in.Address),
+				Phone:     normalizeOptional(in.Phone),
+				Website:   normalizeOptional(in.Website),
+				UpdatedAt: now,
+				ID:        courseID,
+			}); err != nil {
+				return fmt.Errorf("update course: %w", err)
+			}
+		} else {
+			if err := q.CreateCourse(ctx, sqlc.CreateCourseParams{
+				ID:        courseID,
+				Name:      strings.TrimSpace(in.Name),
+				Address:   normalizeOptional(in.Address),
+				Phone:     normalizeOptional(in.Phone),
+				Website:   normalizeOptional(in.Website),
+				CreatedBy: creatorID,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}); err != nil {
+				return fmt.Errorf("insert course: %w", err)
+			}
 		}
 
+		// Upsert tees: match by name on update, create fresh on insert.
 		teeIDByName := make(map[string]string, len(in.Tees))
+		inputTeeNames := make(map[string]bool, len(in.Tees))
 		for i, tee := range in.Tees {
-			teeID := id.New()
+			name := strings.TrimSpace(tee.Name)
+			inputTeeNames[name] = true
 			order := i
 			if tee.DisplayOrder != nil {
 				order = *tee.DisplayOrder
 			}
+
+			if update {
+				existing, err := q.GetTeeByName(ctx, sqlc.GetTeeByNameParams{
+					CourseID: courseID,
+					Name:     name,
+				})
+				if err == nil {
+					// Update existing tee.
+					if err := q.UpdateTee(ctx, sqlc.UpdateTeeParams{
+						Name:                    name,
+						Color:                   tee.Color,
+						CourseRatingMen:         tee.CourseRatingMen,
+						SlopeRatingMen:          intToInt64Ptr(tee.SlopeRatingMen),
+						CourseRatingWomen:       tee.CourseRatingWomen,
+						SlopeRatingWomen:        intToInt64Ptr(tee.SlopeRatingWomen),
+						Front9CourseRatingMen:   tee.Front9CourseRatingMen,
+						Front9SlopeRatingMen:    intToInt64Ptr(tee.Front9SlopeRatingMen),
+						Back9CourseRatingMen:    tee.Back9CourseRatingMen,
+						Back9SlopeRatingMen:     intToInt64Ptr(tee.Back9SlopeRatingMen),
+						Front9CourseRatingWomen: tee.Front9CourseRatingWomen,
+						Front9SlopeRatingWomen:  intToInt64Ptr(tee.Front9SlopeRatingWomen),
+						Back9CourseRatingWomen:  tee.Back9CourseRatingWomen,
+						Back9SlopeRatingWomen:   intToInt64Ptr(tee.Back9SlopeRatingWomen),
+						TotalYardage:            nil,
+						DisplayOrder:            int64(order),
+						ID:                      existing.ID,
+					}); err != nil {
+						return fmt.Errorf("update tee %q: %w", name, err)
+					}
+					teeIDByName[name] = existing.ID
+					continue
+				}
+			}
+
+			// Create new tee.
+			teeID := id.New()
 			if err := q.CreateTee(ctx, teeParams(teeID, courseID, tee, order)); err != nil {
 				return fmt.Errorf("insert tee %q: %w", tee.Name, err)
 			}
-			teeIDByName[strings.TrimSpace(tee.Name)] = teeID
+			teeIDByName[name] = teeID
 		}
 
+		// Delete tees not in the import (update path only).
+		if update {
+			existingTees, err := q.ListTeesByCourse(ctx, courseID)
+			if err != nil {
+				return fmt.Errorf("list tees for cleanup: %w", err)
+			}
+			for _, t := range existingTees {
+				if !inputTeeNames[t.Name] {
+					if err := q.DeleteTee(ctx, t.ID); err != nil {
+						return fmt.Errorf("delete extra tee %q: %w", t.Name, err)
+					}
+				}
+			}
+		}
+
+		// Upsert holes: match by hole_number on update, create fresh on insert.
 		holeIDByNumber := make(map[int]string, len(in.Holes))
+		inputHoleNumbers := make(map[int]bool, len(in.Holes))
 		for _, hole := range in.Holes {
+			inputHoleNumbers[hole.HoleNumber] = true
+
+			if update {
+				existing, err := q.GetHoleByNumber(ctx, sqlc.GetHoleByNumberParams{
+					CourseID:   courseID,
+					HoleNumber: int64(hole.HoleNumber),
+				})
+				if err == nil {
+					// Update existing hole.
+					if err := q.UpdateHole(ctx, sqlc.UpdateHoleParams{
+						HandicapIndex: intToInt64Ptr(hole.HandicapIndex),
+						ID:            existing.ID,
+					}); err != nil {
+						return fmt.Errorf("update hole %d: %w", hole.HoleNumber, err)
+					}
+					holeIDByNumber[hole.HoleNumber] = existing.ID
+					continue
+				}
+			}
+
+			// Create new hole.
 			holeID := id.New()
 			if err := q.CreateHole(ctx, sqlc.CreateHoleParams{
 				ID:            holeID,
@@ -318,15 +425,27 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 			holeIDByNumber[hole.HoleNumber] = holeID
 		}
 
+		// Delete holes not in the import (update path only).
+		if update {
+			existingHoles, err := q.ListHolesByCourse(ctx, courseID)
+			if err != nil {
+				return fmt.Errorf("list holes for cleanup: %w", err)
+			}
+			for _, h := range existingHoles {
+				if !inputHoleNumbers[int(h.HoleNumber)] {
+					if err := q.DeleteHole(ctx, h.ID); err != nil {
+						return fmt.Errorf("delete extra hole %d: %w", h.HoleNumber, err)
+					}
+				}
+			}
+		}
+
+		// Upsert hole tee details.
 		for _, hole := range in.Holes {
 			holeID := holeIDByNumber[hole.HoleNumber]
 			for _, d := range hole.TeeDetails {
 				teeID, ok := teeIDByName[d.TeeName]
 				if !ok {
-					// The handler validates every tee_name against the tees list
-					// before calling Import; a miss here would mean that check was
-					// bypassed, so the row is dropped rather than failing the
-					// whole import.
 					continue
 				}
 				if err := q.UpsertHoleTeeDetail(ctx, sqlc.UpsertHoleTeeDetailParams{
@@ -358,6 +477,7 @@ type UpdateCourseInput struct {
 	Name    string
 	Address *string
 	Phone   *string
+	Website *string
 }
 
 func (s *Service) Update(ctx context.Context, editorID, courseID string, in UpdateCourseInput) (*CourseDetail, error) {
@@ -370,6 +490,7 @@ func (s *Service) Update(ctx context.Context, editorID, courseID string, in Upda
 		Name:      strings.TrimSpace(in.Name),
 		Address:   normalizeOptional(in.Address),
 		Phone:     normalizeOptional(in.Phone),
+		Website:   normalizeOptional(in.Website),
 		UpdatedAt: timex.Now(),
 		ID:        row.ID,
 	}); err != nil {

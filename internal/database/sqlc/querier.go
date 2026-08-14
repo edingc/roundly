@@ -30,6 +30,7 @@ type Querier interface {
 	GetOAuthAccountByProviderSubject(ctx context.Context, arg GetOAuthAccountByProviderSubjectParams) (OauthAccount, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetTee(ctx context.Context, id string) (Tee, error)
+	GetTeeByName(ctx context.Context, arg GetTeeByNameParams) (Tee, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
 	ListCourses(ctx context.Context, arg ListCoursesParams) ([]Course, error)

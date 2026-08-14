@@ -36,6 +36,7 @@ export default function AddCoursePage() {
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
   const [phone, setPhone] = useState('')
+  const [website, setWebsite] = useState('')
   const [holeCount, setHoleCount] = useState<9 | 18>(18)
   const [tees, setTees] = useState<TeeFormValues[]>([emptyTeeForm()])
 
@@ -70,6 +71,7 @@ export default function AddCoursePage() {
         name,
         address: address.trim() === '' ? null : address,
         phone: phone.trim() === '' ? null : formatPhone(phone),
+        website: website.trim() === '' ? null : website,
         hole_count: holeCount,
         tees: tees.filter((tee) => tee.name.trim() !== '').map(teeFormToPayload),
       })
@@ -132,9 +134,9 @@ export default function AddCoursePage() {
                 className={cx(
                   'flex items-center gap-2 rounded-full px-3 py-1',
                   step === s
-                    ? 'bg-brand-600 font-semibold text-white dark:bg-brand-500 dark:text-brand-950'
+                    ? 'bg-brand-600 font-semibold text-white'
                     : step > s
-                      ? 'bg-brand-100 text-brand-800 dark:bg-brand-950 dark:text-brand-200'
+                      ? 'bg-brand-100 text-brand-800 dark:bg-brand-900 dark:text-brand-100'
                       : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
                 )}
                 aria-current={step === s ? 'step' : undefined}
@@ -183,6 +185,15 @@ export default function AddCoursePage() {
             maxLength={30}
             placeholder="Optional"
           />
+          <Field
+            label="Website"
+            type="url"
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+            error={errors.website}
+            maxLength={2048}
+            placeholder="Optional"
+          />
           <fieldset>
             <legend className="label">Holes</legend>
             <div className="flex gap-2">
@@ -194,7 +205,7 @@ export default function AddCoursePage() {
                   className={cx(
                     'btn flex-1',
                     holeCount === count
-                      ? 'bg-brand-600 text-white dark:bg-brand-500 dark:text-brand-950'
+                      ? 'bg-brand-600 text-white'
                       : 'btn-secondary',
                   )}
                   aria-pressed={holeCount === count}

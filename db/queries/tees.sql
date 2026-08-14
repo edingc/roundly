@@ -26,5 +26,8 @@ WHERE id = ?;
 -- name: DeleteTee :exec
 DELETE FROM tees WHERE id = ?;
 
+-- name: GetTeeByName :one
+SELECT * FROM tees WHERE course_id = ? AND name = ?;
+
 -- name: MaxTeeDisplayOrder :one
 SELECT CAST(IFNULL(MAX(display_order), -1) AS INTEGER) AS max_order FROM tees WHERE course_id = ?;

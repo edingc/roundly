@@ -591,10 +591,15 @@ func TestAddHoleRejectsDuplicateHandicapIndex(t *testing.T) {
 	ctx := context.Background()
 	owner := createUser(t, db, "owner@example.com")
 
-	// A nine-hole course gets holes 1-9 with handicap index 1-9 by default.
+	// A nine-hole course gets holes 1-9 with no stroke index by default.
 	detail, err := svc.Create(ctx, owner, CreateCourseInput{Name: "SI GC", HoleCount: 9})
 	if err != nil {
 		t.Fatalf("create course: %v", err)
+	}
+
+	// Assign stroke index 5 to hole 5 so we can test for duplicates.
+	if _, err := svc.UpdateHole(ctx, owner, detail.Holes[4].ID, HoleInput{HandicapIndex: ptr(5)}); err != nil {
+		t.Fatalf("set hole 5 stroke index: %v", err)
 	}
 
 	if _, err := svc.AddHole(ctx, owner, detail.ID, HoleInput{HoleNumber: 10, HandicapIndex: ptr(5)}); err == nil {
@@ -618,6 +623,14 @@ func TestUpdateHoleRejectsDuplicateHandicapIndex(t *testing.T) {
 		t.Fatalf("create course: %v", err)
 	}
 	hole1, hole2 := detail.Holes[0], detail.Holes[1]
+
+	// Assign stroke indexes so we can test duplicate detection.
+	if _, err := svc.UpdateHole(ctx, owner, hole1.ID, HoleInput{HandicapIndex: ptr(1)}); err != nil {
+		t.Fatalf("set hole 1 stroke index: %v", err)
+	}
+	if _, err := svc.UpdateHole(ctx, owner, hole2.ID, HoleInput{HandicapIndex: ptr(2)}); err != nil {
+		t.Fatalf("set hole 2 stroke index: %v", err)
+	}
 
 	if _, err := svc.UpdateHole(ctx, owner, hole1.ID, HoleInput{HandicapIndex: ptr(2)}); err == nil {
 		t.Error("updating a hole to another hole's stroke index was accepted")
@@ -745,5 +758,212 @@ func TestValidateAddressRejectsJunk(t *testing.T) {
 				t.Errorf("validateAddress(%v): rejected = %v, want %v", tc.address, got, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestImportUpdatesExistingCourse verifies that re-importing a v2 export
+// file owned by the same user updates the course in place rather than
+// creating a duplicate.
+func TestImportUpdatesExistingCourse(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	// Create a course via import (simulating a first import).
+	original, err := svc.Import(ctx, owner, ImportCourseInput{
+		Name:    "Original Name",
+		Address: ptr("100 Main St"),
+		Phone:   ptr("555-0000"),
+		Tees: []TeeInput{
+			{Name: "Back", Color: "#000000", CourseRatingMen: ptr(72.0), SlopeRatingMen: ptr(130)},
+			{Name: "Forward", Color: "#FFFFFF"},
+			{Name: "ToRemove", Color: "#FF0000"},
+		},
+		Holes: []ImportHoleInput{
+			{
+				HoleNumber:    1,
+				HandicapIndex: ptr(1),
+				TeeDetails: []ImportTeeDetailInput{
+					{TeeName: "Back", Par: 4, Yardage: 400},
+					{TeeName: "Forward", Par: 3, Yardage: 250},
+					{TeeName: "ToRemove", Par: 4, Yardage: 350},
+				},
+			},
+			{
+				HoleNumber:    2,
+				HandicapIndex: ptr(2),
+				TeeDetails: []ImportTeeDetailInput{
+					{TeeName: "Back", Par: 5, Yardage: 500},
+				},
+			},
+			{
+				HoleNumber: 3,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("initial import: %v", err)
+	}
+
+	// Re-import with the same ID but changed values: rename, change par,
+	// remove a tee, remove a hole, add a new hole.
+	updated, err := svc.Import(ctx, owner, ImportCourseInput{
+		ID:      original.ID,
+		Name:    "Updated Name",
+		Address: ptr("200 New Ave"),
+		Phone:   ptr("555-1111"),
+		Tees: []TeeInput{
+			{Name: "Back", Color: "#000000", CourseRatingMen: ptr(73.5), SlopeRatingMen: ptr(135)},
+			{Name: "Forward", Color: "#FFFFFF"},
+			// "ToRemove" tee is gone.
+		},
+		Holes: []ImportHoleInput{
+			{
+				HoleNumber:    1,
+				HandicapIndex: ptr(5),
+				TeeDetails: []ImportTeeDetailInput{
+					{TeeName: "Back", Par: 5, Yardage: 450}, // changed par and yardage
+					{TeeName: "Forward", Par: 4, Yardage: 300},
+				},
+			},
+			{
+				HoleNumber:    2,
+				HandicapIndex: ptr(2),
+				TeeDetails: []ImportTeeDetailInput{
+					{TeeName: "Back", Par: 5, Yardage: 510},
+				},
+			},
+			// Hole 3 removed, hole 4 added.
+			{
+				HoleNumber:    4,
+				HandicapIndex: ptr(3),
+				TeeDetails: []ImportTeeDetailInput{
+					{TeeName: "Back", Par: 3, Yardage: 180},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("re-import: %v", err)
+	}
+
+	// Same course ID — not a duplicate.
+	if updated.ID != original.ID {
+		t.Errorf("course ID changed: %s -> %s", original.ID, updated.ID)
+	}
+
+	// Course-level fields updated.
+	if updated.Name != "Updated Name" {
+		t.Errorf("name = %q, want Updated Name", updated.Name)
+	}
+	if updated.Address == nil || *updated.Address != "200 New Ave" {
+		t.Errorf("address = %v, want 200 New Ave", updated.Address)
+	}
+
+	// Tees: "ToRemove" gone, "Back" rating updated.
+	if len(updated.Tees) != 2 {
+		t.Fatalf("tees = %d, want 2", len(updated.Tees))
+	}
+	for _, tee := range updated.Tees {
+		if tee.Name == "ToRemove" {
+			t.Error("deleted tee ToRemove still present")
+		}
+		if tee.Name == "Back" {
+			if tee.CourseRatingMen == nil || *tee.CourseRatingMen != 73.5 {
+				t.Errorf("back course_rating_men = %v, want 73.5", tee.CourseRatingMen)
+			}
+		}
+	}
+
+	// Holes: 3 holes (1, 2, 4); hole 3 removed.
+	if len(updated.Holes) != 3 {
+		t.Fatalf("holes = %d, want 3", len(updated.Holes))
+	}
+	holeNumbers := map[int]bool{}
+	for _, h := range updated.Holes {
+		holeNumbers[h.HoleNumber] = true
+	}
+	if holeNumbers[3] {
+		t.Error("deleted hole 3 still present")
+	}
+	if !holeNumbers[4] {
+		t.Error("new hole 4 missing")
+	}
+
+	// Hole 1 should have updated par.
+	hole1 := updated.Holes[0]
+	if hole1.HoleNumber != 1 {
+		t.Fatalf("first hole = %d, want 1", hole1.HoleNumber)
+	}
+	if hole1.HandicapIndex == nil || *hole1.HandicapIndex != 5 {
+		t.Errorf("hole 1 handicap_index = %v, want 5", hole1.HandicapIndex)
+	}
+	var backTeeID string
+	for _, tee := range updated.Tees {
+		if tee.Name == "Back" {
+			backTeeID = tee.ID
+		}
+	}
+	for _, d := range hole1.TeeDetails {
+		if d.TeeID == backTeeID && d.Par != 5 {
+			t.Errorf("hole 1 back tee par = %d, want 5", d.Par)
+		}
+	}
+
+	// Verify only one course exists.
+	page, err := svc.List(ctx, owner, "", 100, 0)
+	if err != nil {
+		t.Fatalf("list courses: %v", err)
+	}
+	if page.Total != 1 {
+		t.Errorf("total courses = %d, want 1 (no duplicate)", page.Total)
+	}
+}
+
+// TestImportOtherUsersCourseCreatesNew verifies that importing a file
+// containing another user's course ID creates a new course rather than
+// overwriting theirs.
+func TestImportOtherUsersCourseCreatesNew(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+	other := createUser(t, db, "other@example.com")
+
+	// Owner creates a course.
+	original, err := svc.Import(ctx, owner, ImportCourseInput{
+		Name: "Owner's Course",
+		Tees: []TeeInput{{Name: "Back", Color: "#000000"}},
+		Holes: []ImportHoleInput{
+			{HoleNumber: 1, TeeDetails: []ImportTeeDetailInput{{TeeName: "Back", Par: 4, Yardage: 400}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create original: %v", err)
+	}
+
+	// Other user imports the same file (with the original's ID).
+	imported, err := svc.Import(ctx, other, ImportCourseInput{
+		ID:   original.ID,
+		Name: "Owner's Course",
+		Tees: []TeeInput{{Name: "Back", Color: "#000000"}},
+		Holes: []ImportHoleInput{
+			{HoleNumber: 1, TeeDetails: []ImportTeeDetailInput{{TeeName: "Back", Par: 4, Yardage: 400}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("import by other user: %v", err)
+	}
+
+	if imported.ID == original.ID {
+		t.Error("other user's import reused the original course ID; expected a new one")
+	}
+
+	// Both courses should exist.
+	page, err := svc.List(ctx, owner, "", 100, 0)
+	if err != nil {
+		t.Fatalf("list courses: %v", err)
+	}
+	if page.Total != 2 {
+		t.Errorf("total courses = %d, want 2", page.Total)
 	}
 }

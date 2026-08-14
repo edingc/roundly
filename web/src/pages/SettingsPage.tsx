@@ -128,7 +128,7 @@ export default function SettingsPage() {
               onClick={() => setTheme(option.value)}
               className={
                 theme === option.value
-                  ? 'btn flex-1 bg-brand-600 text-white dark:bg-brand-500 dark:text-brand-950'
+                  ? 'btn flex-1 bg-brand-600 text-white'
                   : 'btn-secondary flex-1'
               }
             >
@@ -151,7 +151,7 @@ export default function SettingsPage() {
           {notice && <Alert tone="success">{notice}</Alert>}
           {linkError && <Alert>{linkError}</Alert>}
           {googleLinked ? (
-            <p className="inline-flex items-center gap-2 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-900 dark:bg-brand-950/60 dark:text-brand-100">
+            <p className="inline-flex items-center gap-2 rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-900 dark:bg-brand-950/60 dark:text-brand-200">
               <GoogleIcon className="size-4" />
               Linked
             </p>

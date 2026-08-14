@@ -13,7 +13,7 @@ import (
 
 // courseExportFormatVersion is bumped whenever the export shape changes in a
 // way that would break importing an older file.
-const courseExportFormatVersion = 1
+const courseExportFormatVersion = 2
 
 // CourseExport is everything needed to recreate a course elsewhere: tees and
 // holes are matched by name and number instead of ID, since IDs are not
@@ -22,9 +22,11 @@ const courseExportFormatVersion = 1
 // unmodified.
 type CourseExport struct {
 	FormatVersion int          `json:"format_version"`
+	ID            string       `json:"id,omitempty"`
 	Name          string       `json:"name"`
 	Address       *string      `json:"address"`
 	Phone         *string      `json:"phone"`
+	Website       *string      `json:"website"`
 	Tees          []teeRequest `json:"tees"`
 	Holes         []holeExport `json:"holes"`
 }
@@ -95,17 +97,20 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.json"`, exportSlug(detail.Name)))
 	httpx.JSON(w, http.StatusOK, CourseExport{
 		FormatVersion: courseExportFormatVersion,
+		ID:            detail.ID,
 		Name:          detail.Name,
 		Address:       detail.Address,
 		Phone:         detail.Phone,
+		Website:       detail.Website,
 		Tees:          tees,
 		Holes:         holes,
 	})
 }
 
-// importCourse recreates a course, its tees, and its holes (with par and
-// yardage) from a file produced by export. It always creates a new course,
-// owned by the importing user, rather than merging into an existing one.
+// importCourse recreates or updates a course, its tees, and its holes (with
+// par and yardage) from a file produced by export. If the file contains a
+// course ID that the importer owns, the existing course is updated in place;
+// otherwise a new course is created.
 func (h *Handler) importCourse(w http.ResponseWriter, r *http.Request) {
 	var req CourseExport
 	if err := httpx.Decode(w, r, &req); err != nil {
@@ -114,7 +119,7 @@ func (h *Handler) importCourse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone)
+	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website)
 
 	tees := make([]TeeInput, 0, len(req.Tees))
 	teeNameSeen := make(map[string]bool, len(req.Tees))
@@ -173,9 +178,11 @@ func (h *Handler) importCourse(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	detail, err := h.service.Import(ctx, auth.MustUserID(ctx), ImportCourseInput{
+		ID:      req.ID,
 		Name:    req.Name,
 		Address: req.Address,
 		Phone:   req.Phone,
+		Website: req.Website,
 		Tees:    tees,
 		Holes:   holes,
 	})

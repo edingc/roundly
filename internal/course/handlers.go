@@ -129,6 +129,7 @@ type createCourseRequest struct {
 	Name      string       `json:"name"`
 	Address   *string      `json:"address"`
 	Phone     *string      `json:"phone"`
+	Website   *string      `json:"website"`
 	HoleCount int          `json:"hole_count"`
 	Tees      []teeRequest `json:"tees"`
 }
@@ -141,7 +142,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone)
+	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website)
 
 	// Nine- and eighteen-hole courses are the realistic cases, and the holes
 	// table CHECK constraint caps hole numbers at 18 either way.
@@ -163,6 +164,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		Name:      req.Name,
 		Address:   req.Address,
 		Phone:     req.Phone,
+		Website:   req.Website,
 		HoleCount: req.HoleCount,
 		Tees:      tees,
 	})
@@ -177,6 +179,7 @@ type updateCourseRequest struct {
 	Name    string  `json:"name"`
 	Address *string `json:"address"`
 	Phone   *string `json:"phone"`
+	Website *string `json:"website"`
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +190,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone)
+	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website)
 	if err := v.Err(); err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -198,6 +201,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		Name:    req.Name,
 		Address: req.Address,
 		Phone:   req.Phone,
+		Website: req.Website,
 	})
 	if err != nil {
 		httpx.Error(w, r, err)
@@ -387,12 +391,29 @@ func (h *Handler) clearTeeDetail(w http.ResponseWriter, r *http.Request) {
 	httpx.NoContent(w)
 }
 
-func validateCourseFields(v *httpx.Validator, name string, address, phone *string) {
+func validateCourseFields(v *httpx.Validator, name string, address, phone, website *string) {
 	v.Required("name", name)
 	v.MaxLen("name", strings.TrimSpace(name), 120)
 	validateAddress(v, address)
 	if phone != nil {
 		v.MaxLen("phone", strings.TrimSpace(*phone), 30)
+	}
+	validateWebsite(v, website)
+}
+
+// validateWebsite checks that a website, when provided and non-empty, looks
+// like an HTTP(S) URL and is not unreasonably long.
+func validateWebsite(v *httpx.Validator, website *string) {
+	if website == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(*website)
+	if trimmed == "" {
+		return
+	}
+	v.MaxLen("website", trimmed, 2048)
+	if !strings.HasPrefix(trimmed, "http://") && !strings.HasPrefix(trimmed, "https://") {
+		v.Add("website", "Website must start with http:// or https://.")
 	}
 }
 

@@ -41,7 +41,7 @@ export function Alert({
     error:
       'border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/60 dark:text-red-200',
     success:
-      'border-brand-300 bg-brand-50 text-brand-900 dark:border-brand-900 dark:bg-brand-950/60 dark:text-brand-100',
+      'border-brand-300 bg-brand-50 text-brand-900 dark:border-brand-800 dark:bg-brand-950/60 dark:text-brand-100',
     info: 'border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200',
   }
   return (
@@ -172,7 +172,7 @@ export function EmptyState({
 }) {
   return (
     <div className="card flex flex-col items-center gap-3 px-6 py-14 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-950 dark:text-brand-300">
+      <div className="flex size-12 items-center justify-center rounded-full bg-brand-100 text-brand-700 dark:bg-brand-900 dark:text-brand-100">
         <FlagIcon className="size-6" />
       </div>
       <h2 className="text-lg font-semibold">{title}</h2>

@@ -59,6 +59,7 @@ export default function CourseDetailPage() {
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
   const [phone, setPhone] = useState('')
+  const [website, setWebsite] = useState('')
   const [savingDetails, setSavingDetails] = useState(false)
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({})
 
@@ -78,6 +79,7 @@ export default function CourseDetailPage() {
       setName(detail.name)
       setAddress(detail.address ?? '')
       setPhone(detail.phone ?? '')
+      setWebsite(detail.website ?? '')
       setError(null)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not load this course.')
@@ -100,6 +102,7 @@ export default function CourseDetailPage() {
         name,
         address: address.trim() === '' ? null : address,
         phone: phone.trim() === '' ? null : formatPhone(phone),
+        website: website.trim() === '' ? null : website,
       })
       setCourse(updated)
       setEditingDetails(false)
@@ -221,6 +224,15 @@ export default function CourseDetailPage() {
             maxLength={30}
             placeholder="Optional"
           />
+          <Field
+            label="Website"
+            type="url"
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+            error={detailErrors.website}
+            maxLength={2048}
+            placeholder="Optional"
+          />
           <div className="flex gap-2">
             <button
               type="button"
@@ -230,6 +242,7 @@ export default function CourseDetailPage() {
                 setName(course.name)
                 setAddress(course.address ?? '')
                 setPhone(course.phone ?? '')
+                setWebsite(course.website ?? '')
                 setDetailErrors({})
               }}
             >
@@ -250,7 +263,7 @@ export default function CourseDetailPage() {
                   href={mapsSearchUrl(course.address)}
                   target="_blank"
                   rel="noreferrer"
-                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-400"
+                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-300"
                 >
                   {course.address}
                 </a>
@@ -260,9 +273,21 @@ export default function CourseDetailPage() {
               <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
                 <a
                   href={phoneHref(course.phone)}
-                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-400"
+                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-300"
                 >
                   {formatPhone(course.phone)}
+                </a>
+              </p>
+            )}
+            {course.website && (
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
+                <a
+                  href={course.website}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-300"
+                >
+                  {course.website.replace(/^https?:\/\//, '')}
                 </a>
               </p>
             )}

@@ -29,7 +29,7 @@ export function AuthShell({
 
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
-          <span className="flex size-12 items-center justify-center rounded-xl bg-brand-600 text-white dark:bg-brand-500 dark:text-brand-950">
+          <span className="flex size-12 items-center justify-center rounded-xl bg-brand-600 text-white">
             <FlagIcon className="size-7" />
           </span>
           <div>

@@ -8,6 +8,7 @@ type Course struct {
 	Name      string  `json:"name"`
 	Address   *string `json:"address"`
 	Phone     *string `json:"phone"`
+	Website   *string `json:"website"`
 	CreatedBy string  `json:"created_by"`
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
@@ -88,6 +89,7 @@ func toCourse(row sqlc.Course, viewerID string) Course {
 		Name:      row.Name,
 		Address:   row.Address,
 		Phone:     row.Phone,
+		Website:   row.Website,
 		CreatedBy: row.CreatedBy,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,

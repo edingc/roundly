@@ -250,13 +250,14 @@ export const api = {
     name: string
     address?: string | null
     phone?: string | null
+    website?: string | null
     hole_count?: number
     tees?: TeePayload[]
   }) => request<CourseDetail>('/courses', { method: 'POST', body: payload }),
 
   updateCourse: (
     id: string,
-    payload: { name: string; address?: string | null; phone?: string | null },
+    payload: { name: string; address?: string | null; phone?: string | null; website?: string | null },
   ) => request<CourseDetail>(`/courses/${id}`, { method: 'PUT', body: payload }),
 
   deleteCourse: (id: string) => request<void>(`/courses/${id}`, { method: 'DELETE' }),

@@ -23,6 +23,7 @@ export interface CourseSummary {
   name: string
   address: string | null
   phone: string | null
+  website: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -86,9 +87,11 @@ export interface CoursePage {
  */
 export interface CourseExport {
   format_version: number
+  id?: string
   name: string
   address: string | null
   phone: string | null
+  website: string | null
   tees: TeePayload[]
   holes: Array<{
     hole_number: number

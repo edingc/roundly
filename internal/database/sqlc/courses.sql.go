@@ -34,8 +34,8 @@ func (q *Queries) CountSearchCourses(ctx context.Context, query string) (int64, 
 }
 
 const createCourse = `-- name: CreateCourse :exec
-INSERT INTO courses (id, name, address, phone, created_by, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO courses (id, name, address, phone, website, created_by, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateCourseParams struct {
@@ -43,6 +43,7 @@ type CreateCourseParams struct {
 	Name      string
 	Address   *string
 	Phone     *string
+	Website   *string
 	CreatedBy string
 	CreatedAt string
 	UpdatedAt string
@@ -54,6 +55,7 @@ func (q *Queries) CreateCourse(ctx context.Context, arg CreateCourseParams) erro
 		arg.Name,
 		arg.Address,
 		arg.Phone,
+		arg.Website,
 		arg.CreatedBy,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -71,7 +73,7 @@ func (q *Queries) DeleteCourse(ctx context.Context, id string) error {
 }
 
 const getCourse = `-- name: GetCourse :one
-SELECT id, name, address, created_by, created_at, updated_at, phone FROM courses WHERE id = ?
+SELECT id, name, address, created_by, created_at, updated_at, phone, website FROM courses WHERE id = ?
 `
 
 func (q *Queries) GetCourse(ctx context.Context, id string) (Course, error) {
@@ -85,12 +87,13 @@ func (q *Queries) GetCourse(ctx context.Context, id string) (Course, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Phone,
+		&i.Website,
 	)
 	return i, err
 }
 
 const listCourses = `-- name: ListCourses :many
-SELECT id, name, address, created_by, created_at, updated_at, phone FROM courses
+SELECT id, name, address, created_by, created_at, updated_at, phone, website FROM courses
 ORDER BY name COLLATE NOCASE ASC
 LIMIT ? OFFSET ?
 `
@@ -117,6 +120,7 @@ func (q *Queries) ListCourses(ctx context.Context, arg ListCoursesParams) ([]Cou
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Phone,
+			&i.Website,
 		); err != nil {
 			return nil, err
 		}
@@ -132,7 +136,7 @@ func (q *Queries) ListCourses(ctx context.Context, arg ListCoursesParams) ([]Cou
 }
 
 const searchCourses = `-- name: SearchCourses :many
-SELECT id, name, address, created_by, created_at, updated_at, phone FROM courses
+SELECT id, name, address, created_by, created_at, updated_at, phone, website FROM courses
 WHERE instr(lower(name), ?1) > 0
    OR instr(lower(IFNULL(address, '')), ?1) > 0
 ORDER BY name COLLATE NOCASE ASC
@@ -166,6 +170,7 @@ func (q *Queries) SearchCourses(ctx context.Context, arg SearchCoursesParams) ([
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Phone,
+			&i.Website,
 		); err != nil {
 			return nil, err
 		}
@@ -195,13 +200,14 @@ func (q *Queries) TouchCourse(ctx context.Context, arg TouchCourseParams) error 
 }
 
 const updateCourse = `-- name: UpdateCourse :exec
-UPDATE courses SET name = ?, address = ?, phone = ?, updated_at = ? WHERE id = ?
+UPDATE courses SET name = ?, address = ?, phone = ?, website = ?, updated_at = ? WHERE id = ?
 `
 
 type UpdateCourseParams struct {
 	Name      string
 	Address   *string
 	Phone     *string
+	Website   *string
 	UpdatedAt string
 	ID        string
 }
@@ -211,6 +217,7 @@ func (q *Queries) UpdateCourse(ctx context.Context, arg UpdateCourseParams) erro
 		arg.Name,
 		arg.Address,
 		arg.Phone,
+		arg.Website,
 		arg.UpdatedAt,
 		arg.ID,
 	)

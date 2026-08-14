@@ -12,6 +12,7 @@ type Course struct {
 	CreatedAt string
 	UpdatedAt string
 	Phone     *string
+	Website   *string
 }
 
 type Hole struct {
