@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Roundly">
+  <rect width="512" height="512" rx="112" fill="#166534" />
+  <g stroke="#ffffff" stroke-width="26" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M170 400V128" />
+    <path d="M170 128l150 46-150 46z" fill="#facc15" stroke="#facc15" />
+  </g>
+  <circle cx="300" cy="392" r="34" fill="#ffffff" />
+  <g fill="#166534">
+    <circle cx="290" cy="382" r="4" />
+    <circle cx="304" cy="384" r="4" />
+    <circle cx="297" cy="396" r="4" />
+    <circle cx="311" cy="398" r="4" />
+  </g>
+</svg>

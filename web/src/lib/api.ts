@@ -1,0 +1,314 @@
+import type {
+  AuthConfig,
+  CourseDetail,
+  CoursePage,
+  Hole,
+  Session,
+  Tee,
+  TeePayload,
+  User,
+} from '../types'
+
+const REFRESH_TOKEN_KEY = 'roundly.refresh_token'
+
+/**
+ * ApiError carries the server's error envelope so callers can show the message
+ * and attach `fields` to the inputs that failed.
+ */
+export class ApiError extends Error {
+  readonly status: number
+  readonly code: string
+  readonly fields: Record<string, string>
+
+  constructor(status: number, code: string, message: string, fields?: Record<string, string>) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = code
+    this.fields = fields ?? {}
+  }
+
+  /** True when the failure was a per-field validation problem. */
+  get isValidation(): boolean {
+    return this.code === 'validation_failed' || Object.keys(this.fields).length > 0
+  }
+}
+
+/**
+ * Token state lives in this module rather than in React state.
+ *
+ * The access token is deliberately kept in memory only: anything in
+ * localStorage is readable by any script on the page. The refresh token has to
+ * survive a reload for sessions to persist, so it is the one value stored, and
+ * it is single-use — the server rotates it on every refresh.
+ */
+let accessToken: string | null = null
+let onSessionExpired: (() => void) | null = null
+
+/** Deduplicates concurrent refreshes so parallel 401s trigger only one call. */
+let refreshInFlight: Promise<string | null> | null = null
+
+export function getAccessToken(): string | null {
+  return accessToken
+}
+
+export function getStoredRefreshToken(): string | null {
+  try {
+    return localStorage.getItem(REFRESH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setSession(session: Session | null): void {
+  accessToken = session?.access_token ?? null
+  try {
+    if (session?.refresh_token) {
+      localStorage.setItem(REFRESH_TOKEN_KEY, session.refresh_token)
+    } else {
+      localStorage.removeItem(REFRESH_TOKEN_KEY)
+    }
+  } catch {
+    // Private browsing can block storage. The session still works until reload.
+  }
+}
+
+/** Registers the callback that clears app state when the session dies. */
+export function setSessionExpiredHandler(handler: (() => void) | null): void {
+  onSessionExpired = handler
+}
+
+interface RequestOptions {
+  method?: string
+  body?: unknown
+  /** Skip the Authorization header and the retry-after-refresh behavior. */
+  auth?: boolean
+  signal?: AbortSignal
+}
+
+async function parseError(response: Response): Promise<ApiError> {
+  let code = 'unknown_error'
+  let message = `Request failed with status ${response.status}.`
+  let fields: Record<string, string> | undefined
+
+  try {
+    const body = await response.json()
+    if (typeof body?.message === 'string') message = body.message
+    if (typeof body?.error === 'string') code = body.error
+    if (body?.fields && typeof body.fields === 'object') fields = body.fields
+  } catch {
+    // A non-JSON body (a proxy error page, say) leaves the defaults in place.
+  }
+
+  return new ApiError(response.status, code, message, fields)
+}
+
+async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (options.auth !== false && accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`
+  }
+
+  const response = await fetch(`/api${path}`, {
+    method: options.method ?? 'GET',
+    headers,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    // Cookies carry the OAuth state/PKCE values during the Google redirect.
+    credentials: 'same-origin',
+    signal: options.signal,
+  })
+
+  if (!response.ok) throw await parseError(response)
+  if (response.status === 204) return undefined as T
+  return (await response.json()) as T
+}
+
+/**
+ * Exchanges the stored refresh token for a new session.
+ *
+ * Concurrent callers share one in-flight request, so a screen that fires several
+ * requests at once after the access token expires does not burn several
+ * single-use refresh tokens and trip the server's replay defense.
+ */
+async function refreshSession(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight
+
+  refreshInFlight = (async () => {
+    const stored = getStoredRefreshToken()
+    if (!stored) return null
+    try {
+      const session = await rawRequest<Session>('/auth/refresh', {
+        method: 'POST',
+        body: { refresh_token: stored },
+        auth: false,
+      })
+      setSession(session)
+      return session.access_token
+    } catch {
+      setSession(null)
+      return null
+    }
+  })()
+
+  try {
+    return await refreshInFlight
+  } finally {
+    refreshInFlight = null
+  }
+}
+
+/** Issues an authenticated request, refreshing once on a 401. */
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  try {
+    return await rawRequest<T>(path, options)
+  } catch (error) {
+    const canRetry = error instanceof ApiError && error.status === 401 && options.auth !== false
+    if (!canRetry) throw error
+
+    const token = await refreshSession()
+    if (!token) {
+      onSessionExpired?.()
+      throw error
+    }
+    return await rawRequest<T>(path, options)
+  }
+}
+
+/** Restores a session on app start. Returns null when not signed in. */
+export async function restoreSession(): Promise<Session | null> {
+  const stored = getStoredRefreshToken()
+  if (!stored) return null
+  try {
+    const session = await rawRequest<Session>('/auth/refresh', {
+      method: 'POST',
+      body: { refresh_token: stored },
+      auth: false,
+    })
+    setSession(session)
+    return session
+  } catch {
+    setSession(null)
+    return null
+  }
+}
+
+export const api = {
+  authConfig: () => request<AuthConfig>('/auth/config', { auth: false }),
+
+  signUp: (email: string, password: string, displayName: string) =>
+    request<Session>('/auth/signup', {
+      method: 'POST',
+      body: { email, password, display_name: displayName },
+      auth: false,
+    }),
+
+  logIn: (email: string, password: string) =>
+    request<Session>('/auth/login', {
+      method: 'POST',
+      body: { email, password },
+      auth: false,
+    }),
+
+  /** Trades the one-time code from the Google redirect for a real session. */
+  exchangeGoogleCode: (code: string) =>
+    request<Session>('/auth/google/exchange', {
+      method: 'POST',
+      body: { code },
+      auth: false,
+    }),
+
+  logOut: () => {
+    const stored = getStoredRefreshToken()
+    return request<void>('/auth/logout', {
+      method: 'POST',
+      body: { refresh_token: stored ?? '' },
+    })
+  },
+
+  me: () => request<User>('/auth/me'),
+
+  setPassword: (currentPassword: string, newPassword: string) =>
+    request<User>('/auth/password', {
+      method: 'POST',
+      body: { current_password: currentPassword, new_password: newPassword },
+    }),
+
+  listCourses: (params: { q?: string; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.q) query.set('q', params.q)
+    if (params.limit !== undefined) query.set('limit', String(params.limit))
+    if (params.offset !== undefined) query.set('offset', String(params.offset))
+    const suffix = query.toString()
+    return request<CoursePage>(`/courses${suffix ? `?${suffix}` : ''}`)
+  },
+
+  getCourse: (id: string) => request<CourseDetail>(`/courses/${id}`),
+
+  createCourse: (payload: {
+    name: string
+    address?: string | null
+    hole_count?: number
+    tees?: TeePayload[]
+  }) => request<CourseDetail>('/courses', { method: 'POST', body: payload }),
+
+  updateCourse: (id: string, payload: { name: string; address?: string | null }) =>
+    request<CourseDetail>(`/courses/${id}`, { method: 'PUT', body: payload }),
+
+  deleteCourse: (id: string) => request<void>(`/courses/${id}`, { method: 'DELETE' }),
+
+  addTee: (courseId: string, payload: TeePayload) =>
+    request<Tee>(`/courses/${courseId}/tees`, { method: 'POST', body: payload }),
+
+  updateTee: (teeId: string, payload: TeePayload) =>
+    request<Tee>(`/tees/${teeId}`, { method: 'PUT', body: payload }),
+
+  deleteTee: (teeId: string) => request<void>(`/tees/${teeId}`, { method: 'DELETE' }),
+
+  addHole: (courseId: string, holeNumber: number, handicapIndex?: number | null) =>
+    request<Hole>(`/courses/${courseId}/holes`, {
+      method: 'POST',
+      body: { hole_number: holeNumber, handicap_index: handicapIndex ?? null },
+    }),
+
+  updateHole: (holeId: string, handicapIndex: number | null) =>
+    request<Hole>(`/holes/${holeId}`, {
+      method: 'PUT',
+      body: { handicap_index: handicapIndex },
+    }),
+
+  deleteHole: (holeId: string) => request<void>(`/holes/${holeId}`, { method: 'DELETE' }),
+
+  /** Upserts one cell of the par/yardage grid. */
+  setTeeDetail: (holeId: string, teeId: string, par: number, yardage: number) =>
+    request<Hole>(`/holes/${holeId}/tee-details/${teeId}`, {
+      method: 'PUT',
+      body: { par, yardage },
+    }),
+
+  clearTeeDetail: (holeId: string, teeId: string) =>
+    request<void>(`/holes/${holeId}/tee-details/${teeId}`, { method: 'DELETE' }),
+
+  /**
+   * Begins linking Google to the signed-in account.
+   *
+   * This has to be an XHR rather than a plain navigation, because the endpoint
+   * is authenticated and a browser navigation cannot carry the Bearer header.
+   * The response sets the OAuth state cookies and returns the consent URL for
+   * the caller to navigate to.
+   */
+  startGoogleLink: (returnTo: string) =>
+    request<{ authorization_url: string }>(
+      `/auth/link/google?mode=json&return_to=${encodeURIComponent(returnTo)}`,
+      { method: 'POST' },
+    ),
+}
+
+/**
+ * URL that begins Google sign-in. Unauthenticated, so the browser can navigate
+ * to it directly and let the server issue the redirect to Google.
+ */
+export function googleLoginUrl(returnTo?: string): string {
+  const query = returnTo ? `?return_to=${encodeURIComponent(returnTo)}` : ''
+  return `/api/auth/google/start${query}`
+}

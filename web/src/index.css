@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+
+/* Class-based dark mode rather than media-query-based, so the in-app toggle can
+   override the OS preference. The inline script in index.html sets the class
+   before first paint. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Fairway green is the brand accent. Shades are chosen so the same token
+     reads correctly on both light and dark surfaces. */
+  --color-brand-50: oklch(0.97 0.02 150);
+  --color-brand-100: oklch(0.94 0.04 150);
+  --color-brand-200: oklch(0.88 0.07 150);
+  --color-brand-300: oklch(0.8 0.1 150);
+  --color-brand-400: oklch(0.71 0.14 150);
+  --color-brand-500: oklch(0.63 0.16 150);
+  --color-brand-600: oklch(0.54 0.15 150);
+  --color-brand-700: oklch(0.45 0.13 150);
+  --color-brand-800: oklch(0.37 0.1 150);
+  --color-brand-900: oklch(0.3 0.08 150);
+  --color-brand-950: oklch(0.2 0.05 150);
+}
+
+@layer base {
+  html {
+    /* Prevents iOS Safari from inflating text in landscape. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+    @apply dark:bg-slate-950 dark:text-slate-100;
+  }
+
+  /* A visible focus ring on keyboard navigation only. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-brand-600 dark:outline-brand-400;
+  }
+
+  /* Number inputs in the par/yardage grid: hide the spinners, which are too
+     small to hit on a phone and steal horizontal space in a 5-column table. */
+  input[type='number']::-webkit-inner-spin-button,
+  input[type='number']::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+}
+
+/* These are registered with @utility rather than defined in @layer components,
+   because Tailwind v4 only lets @apply reference real utilities — the button
+   variants below build on `btn`, which requires it to be one. */
+
+@utility card {
+  @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+  @apply dark:border-slate-800 dark:bg-slate-900;
+}
+
+@utility label {
+  @apply mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300;
+}
+
+@utility input {
+  @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm;
+  @apply placeholder:text-slate-400;
+  @apply focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 focus:outline-none;
+  @apply dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500;
+  @apply disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+@utility input-error {
+  @apply border-red-500 focus:border-red-500 focus:ring-red-500/30;
+  @apply dark:border-red-500;
+}
+
+@utility field-error {
+  @apply mt-1.5 text-sm text-red-600 dark:text-red-400;
+}
+
+/* Minimum 44px tall targets: this app gets used one-handed on a golf course. */
+@utility btn {
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5;
+  @apply text-sm font-semibold transition-colors;
+  @apply disabled:cursor-not-allowed disabled:opacity-60;
+}
+
+@utility btn-primary {
+  @apply btn bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800;
+  @apply dark:bg-brand-500 dark:text-brand-950 dark:hover:bg-brand-400 dark:active:bg-brand-300;
+}
+
+@utility btn-secondary {
+  @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
+  @apply dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800;
+}
+
+@utility btn-ghost {
+  @apply btn text-slate-600 hover:bg-slate-100 hover:text-slate-900;
+  @apply dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+}
+
+@utility btn-danger {
+  @apply btn bg-red-600 text-white hover:bg-red-700 active:bg-red-800;
+  @apply dark:bg-red-600 dark:hover:bg-red-500;
+}

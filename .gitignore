@@ -1,0 +1,27 @@
+# Build output
+/bin/
+/roundly
+/tmp/
+
+# The frontend build is embedded at compile time and rebuilt from source.
+# The placeholder index.html is tracked so `go build` works on a clean checkout.
+/web/dist/*
+!/web/dist/index.html
+
+# Dependencies
+/web/node_modules/
+
+# Local database files (SQLite plus its WAL and shared-memory sidecars)
+*.db
+*.db-wal
+*.db-shm
+
+# Local configuration
+.env
+.env.local
+
+# Editor and OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/
