@@ -1,17 +1,31 @@
-import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
-import type { CoursePage } from '../types'
-import { Alert, EmptyState, PageSpinner, PlusIcon, SearchIcon } from '../components/ui'
+import type { CourseExport, CoursePage } from '../types'
+import {
+  Alert,
+  EmptyState,
+  PageSpinner,
+  PlusIcon,
+  SearchIcon,
+  Spinner,
+  UploadIcon,
+} from '../components/ui'
 
 const PAGE_SIZE = 25
 
 export default function CourseListPage() {
+  const navigate = useNavigate()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   const [search, setSearch] = useState('')
   const [page, setPage] = useState<CoursePage | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [offset, setOffset] = useState(0)
+
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<string | null>(null)
 
   // Debounce so typing in the search box does not fire a request per keystroke.
   useEffect(() => {
@@ -47,6 +61,31 @@ export default function CourseListPage() {
     setOffset(0)
   }, [search])
 
+  /** Reads a file exported by another course, then recreates it here. */
+  async function handleImportFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = '' // lets the same file be picked again after an error
+    if (!file) return
+
+    setImporting(true)
+    setImportError(null)
+    try {
+      let payload: unknown
+      try {
+        payload = JSON.parse(await file.text())
+      } catch {
+        throw new Error('That file is not valid JSON.')
+      }
+      const detail = await api.importCourse(payload as CourseExport)
+      navigate(`/courses/${detail.id}`)
+    } catch (err) {
+      setImportError(
+        err instanceof ApiError || err instanceof Error ? err.message : 'Could not import that file.',
+      )
+      setImporting(false)
+    }
+  }
+
   const items = page?.items ?? []
   const total = page?.total ?? 0
   const showingEmpty = !loading && items.length === 0
@@ -60,11 +99,37 @@ export default function CourseListPage() {
             {total === 0 ? 'No courses yet' : `${total} course${total === 1 ? '' : 's'}`}
           </p>
         </div>
-        <Link to="/courses/new" className="btn-primary ml-auto">
-          <PlusIcon className="size-4" />
-          Add course
-        </Link>
+        <div className="ml-auto flex gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(e) => void handleImportFile(e)}
+          />
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={importing}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {importing ? (
+              <Spinner label="Importing" />
+            ) : (
+              <>
+                <UploadIcon className="size-4" />
+                Import
+              </>
+            )}
+          </button>
+          <Link to="/courses/new" className="btn-primary">
+            <PlusIcon className="size-4" />
+            Add course
+          </Link>
+        </div>
       </div>
+
+      {importError && <Alert>{importError}</Alert>}
 
       <div className="relative">
         <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-5 -translate-y-1/2 text-slate-400" />

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
+import { formatPhone } from '../lib/phone'
 import type { CourseDetail } from '../types'
 import {
   TeeFields,
@@ -34,6 +35,7 @@ export default function AddCoursePage() {
   const [step, setStep] = useState<Step>(1)
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
+  const [phone, setPhone] = useState('')
   const [holeCount, setHoleCount] = useState<9 | 18>(18)
   const [tees, setTees] = useState<TeeFormValues[]>([emptyTeeForm()])
 
@@ -67,6 +69,7 @@ export default function AddCoursePage() {
       const detail = await api.createCourse({
         name,
         address: address.trim() === '' ? null : address,
+        phone: phone.trim() === '' ? null : formatPhone(phone),
         hole_count: holeCount,
         tees: tees.filter((tee) => tee.name.trim() !== '').map(teeFormToPayload),
       })
@@ -169,6 +172,15 @@ export default function AddCoursePage() {
             onChange={(e) => setAddress(e.target.value)}
             error={errors.address}
             maxLength={240}
+            placeholder="Optional"
+          />
+          <Field
+            label="Phone number"
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            error={errors.phone}
+            maxLength={30}
             placeholder="Optional"
           />
           <fieldset>

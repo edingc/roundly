@@ -157,6 +157,7 @@ func (s *Service) detail(ctx context.Context, row sqlc.Course, viewerID string) 
 type CreateCourseInput struct {
 	Name    string
 	Address *string
+	Phone   *string
 	// HoleCount pre-creates holes 1..HoleCount so the par/yardage grid is
 	// immediately usable. Zero means DefaultHoleCount.
 	HoleCount int
@@ -165,11 +166,21 @@ type CreateCourseInput struct {
 
 // TeeInput is a tee in a create or update request.
 type TeeInput struct {
-	Name         string
-	Color        string
-	CourseRating *float64
-	SlopeRating  *int
-	DisplayOrder *int
+	Name                    string
+	Color                   string
+	CourseRatingMen         *float64
+	SlopeRatingMen          *int
+	CourseRatingWomen       *float64
+	SlopeRatingWomen        *int
+	Front9CourseRatingMen   *float64
+	Front9SlopeRatingMen    *int
+	Back9CourseRatingMen    *float64
+	Back9SlopeRatingMen     *int
+	Front9CourseRatingWomen *float64
+	Front9SlopeRatingWomen  *int
+	Back9CourseRatingWomen  *float64
+	Back9SlopeRatingWomen   *int
+	DisplayOrder            *int
 }
 
 // Create makes a course, its holes, and any tees supplied up front, in one
@@ -188,6 +199,7 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 			ID:        courseID,
 			Name:      strings.TrimSpace(in.Name),
 			Address:   normalizeOptional(in.Address),
+			Phone:     normalizeOptional(in.Phone),
 			CreatedBy: creatorID,
 			CreatedAt: now,
 			UpdatedAt: now,
@@ -230,10 +242,122 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 	return s.detail(ctx, row, creatorID)
 }
 
+// ImportTeeDetailInput is one hole's par and yardage for one named tee, from
+// an imported course file.
+type ImportTeeDetailInput struct {
+	TeeName string
+	Par     int
+	Yardage int
+}
+
+// ImportHoleInput is one hole, with its per-tee par and yardage, from an
+// imported course file. Tees are referenced by name rather than ID, since IDs
+// are not stable across app instances.
+type ImportHoleInput struct {
+	HoleNumber    int
+	HandicapIndex *int
+	TeeDetails    []ImportTeeDetailInput
+}
+
+// ImportCourseInput is the payload for recreating a course, its tees, and its
+// holes from data produced by Export.
+type ImportCourseInput struct {
+	Name    string
+	Address *string
+	Phone   *string
+	Tees    []TeeInput
+	Holes   []ImportHoleInput
+}
+
+// Import recreates a course, its tees, and its holes (with par and yardage)
+// from data produced by Export, in one transaction so a partial import is
+// never visible. Hole tee details reference tees by name rather than ID,
+// since IDs are not stable across app instances — an export from one
+// instance has to be able to land in another.
+func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseInput) (*CourseDetail, error) {
+	courseID := id.New()
+	now := timex.Now()
+
+	err := s.db.InTx(func(q *sqlc.Queries) error {
+		if err := q.CreateCourse(ctx, sqlc.CreateCourseParams{
+			ID:        courseID,
+			Name:      strings.TrimSpace(in.Name),
+			Address:   normalizeOptional(in.Address),
+			Phone:     normalizeOptional(in.Phone),
+			CreatedBy: creatorID,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}); err != nil {
+			return fmt.Errorf("insert course: %w", err)
+		}
+
+		teeIDByName := make(map[string]string, len(in.Tees))
+		for i, tee := range in.Tees {
+			teeID := id.New()
+			order := i
+			if tee.DisplayOrder != nil {
+				order = *tee.DisplayOrder
+			}
+			if err := q.CreateTee(ctx, teeParams(teeID, courseID, tee, order)); err != nil {
+				return fmt.Errorf("insert tee %q: %w", tee.Name, err)
+			}
+			teeIDByName[strings.TrimSpace(tee.Name)] = teeID
+		}
+
+		holeIDByNumber := make(map[int]string, len(in.Holes))
+		for _, hole := range in.Holes {
+			holeID := id.New()
+			if err := q.CreateHole(ctx, sqlc.CreateHoleParams{
+				ID:            holeID,
+				CourseID:      courseID,
+				HoleNumber:    int64(hole.HoleNumber),
+				HandicapIndex: intToInt64Ptr(hole.HandicapIndex),
+			}); err != nil {
+				return fmt.Errorf("insert hole %d: %w", hole.HoleNumber, err)
+			}
+			holeIDByNumber[hole.HoleNumber] = holeID
+		}
+
+		for _, hole := range in.Holes {
+			holeID := holeIDByNumber[hole.HoleNumber]
+			for _, d := range hole.TeeDetails {
+				teeID, ok := teeIDByName[d.TeeName]
+				if !ok {
+					// The handler validates every tee_name against the tees list
+					// before calling Import; a miss here would mean that check was
+					// bypassed, so the row is dropped rather than failing the
+					// whole import.
+					continue
+				}
+				if err := q.UpsertHoleTeeDetail(ctx, sqlc.UpsertHoleTeeDetailParams{
+					ID:      id.New(),
+					HoleID:  holeID,
+					TeeID:   teeID,
+					Par:     int64(d.Par),
+					Yardage: int64(d.Yardage),
+				}); err != nil {
+					return fmt.Errorf("insert hole %d tee detail: %w", hole.HoleNumber, err)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, httpx.Internal(fmt.Errorf("import course: %w", err))
+	}
+
+	row, err := s.loadCourse(ctx, courseID)
+	if err != nil {
+		return nil, err
+	}
+	return s.detail(ctx, row, creatorID)
+}
+
 // UpdateCourseInput is the payload for updating course-level fields.
 type UpdateCourseInput struct {
 	Name    string
 	Address *string
+	Phone   *string
 }
 
 func (s *Service) Update(ctx context.Context, editorID, courseID string, in UpdateCourseInput) (*CourseDetail, error) {
@@ -245,6 +369,7 @@ func (s *Service) Update(ctx context.Context, editorID, courseID string, in Upda
 	if err := s.db.Queries.UpdateCourse(ctx, sqlc.UpdateCourseParams{
 		Name:      strings.TrimSpace(in.Name),
 		Address:   normalizeOptional(in.Address),
+		Phone:     normalizeOptional(in.Phone),
 		UpdatedAt: timex.Now(),
 		ID:        row.ID,
 	}); err != nil {
@@ -320,13 +445,23 @@ func (s *Service) UpdateTee(ctx context.Context, editorID, teeID string, in TeeI
 	}
 
 	if err := s.db.Queries.UpdateTee(ctx, sqlc.UpdateTeeParams{
-		Name:         strings.TrimSpace(in.Name),
-		Color:        in.Color,
-		CourseRating: in.CourseRating,
-		SlopeRating:  intToInt64Ptr(in.SlopeRating),
-		TotalYardage: row.TotalYardage,
-		DisplayOrder: int64(order),
-		ID:           teeID,
+		Name:                    strings.TrimSpace(in.Name),
+		Color:                   in.Color,
+		CourseRatingMen:         in.CourseRatingMen,
+		SlopeRatingMen:          intToInt64Ptr(in.SlopeRatingMen),
+		CourseRatingWomen:       in.CourseRatingWomen,
+		SlopeRatingWomen:        intToInt64Ptr(in.SlopeRatingWomen),
+		Front9CourseRatingMen:   in.Front9CourseRatingMen,
+		Front9SlopeRatingMen:    intToInt64Ptr(in.Front9SlopeRatingMen),
+		Back9CourseRatingMen:    in.Back9CourseRatingMen,
+		Back9SlopeRatingMen:     intToInt64Ptr(in.Back9SlopeRatingMen),
+		Front9CourseRatingWomen: in.Front9CourseRatingWomen,
+		Front9SlopeRatingWomen:  intToInt64Ptr(in.Front9SlopeRatingWomen),
+		Back9CourseRatingWomen:  in.Back9CourseRatingWomen,
+		Back9SlopeRatingWomen:   intToInt64Ptr(in.Back9SlopeRatingWomen),
+		TotalYardage:            row.TotalYardage,
+		DisplayOrder:            int64(order),
+		ID:                      teeID,
 	}); err != nil {
 		return nil, httpx.Internal(fmt.Errorf("update tee: %w", err))
 	}
@@ -384,6 +519,12 @@ func (s *Service) AddHole(ctx context.Context, editorID, courseID string, in Hol
 		return nil, httpx.Internal(fmt.Errorf("lookup hole by number: %w", err))
 	}
 
+	if in.HandicapIndex != nil {
+		if err := s.checkHandicapIndexUnique(ctx, courseID, "", *in.HandicapIndex); err != nil {
+			return nil, err
+		}
+	}
+
 	holeID := id.New()
 	if err := s.db.Queries.CreateHole(ctx, sqlc.CreateHoleParams{
 		ID:            holeID,
@@ -414,6 +555,12 @@ func (s *Service) UpdateHole(ctx context.Context, editorID, holeID string, in Ho
 	}
 	if _, err := s.loadEditableCourse(ctx, editorID, row.CourseID); err != nil {
 		return nil, err
+	}
+
+	if in.HandicapIndex != nil {
+		if err := s.checkHandicapIndexUnique(ctx, row.CourseID, holeID, *in.HandicapIndex); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := s.db.Queries.UpdateHole(ctx, sqlc.UpdateHoleParams{
@@ -523,6 +670,23 @@ func (s *Service) ClearTeeDetail(ctx context.Context, editorID, holeID, teeID st
 	return nil
 }
 
+// checkHandicapIndexUnique reports a conflict if another hole on the course
+// already uses index. excludeHoleID is skipped, so updating a hole to the
+// stroke index it already has does not trip over itself.
+func (s *Service) checkHandicapIndexUnique(ctx context.Context, courseID, excludeHoleID string, index int) error {
+	holes, err := s.db.Queries.ListHolesByCourse(ctx, courseID)
+	if err != nil {
+		return httpx.Internal(fmt.Errorf("list holes for course %s: %w", courseID, err))
+	}
+	for _, h := range holes {
+		if h.ID == excludeHoleID || h.HandicapIndex == nil || int(*h.HandicapIndex) != index {
+			continue
+		}
+		return httpx.Conflict(fmt.Sprintf("Stroke index %d is already used by hole %d.", index, h.HoleNumber))
+	}
+	return nil
+}
+
 func (s *Service) teeDetailsForHole(ctx context.Context, holeID string) ([]TeeDetail, error) {
 	rows, err := s.db.Queries.ListHoleTeeDetailsByHole(ctx, holeID)
 	if err != nil {
@@ -570,12 +734,22 @@ func (s *Service) touch(ctx context.Context, courseID string) {
 
 func teeParams(teeID, courseID string, in TeeInput, order int) sqlc.CreateTeeParams {
 	return sqlc.CreateTeeParams{
-		ID:           teeID,
-		CourseID:     courseID,
-		Name:         strings.TrimSpace(in.Name),
-		Color:        in.Color,
-		CourseRating: in.CourseRating,
-		SlopeRating:  intToInt64Ptr(in.SlopeRating),
+		ID:                      teeID,
+		CourseID:                courseID,
+		Name:                    strings.TrimSpace(in.Name),
+		Color:                   in.Color,
+		CourseRatingMen:         in.CourseRatingMen,
+		SlopeRatingMen:          intToInt64Ptr(in.SlopeRatingMen),
+		CourseRatingWomen:       in.CourseRatingWomen,
+		SlopeRatingWomen:        intToInt64Ptr(in.SlopeRatingWomen),
+		Front9CourseRatingMen:   in.Front9CourseRatingMen,
+		Front9SlopeRatingMen:    intToInt64Ptr(in.Front9SlopeRatingMen),
+		Back9CourseRatingMen:    in.Back9CourseRatingMen,
+		Back9SlopeRatingMen:     intToInt64Ptr(in.Back9SlopeRatingMen),
+		Front9CourseRatingWomen: in.Front9CourseRatingWomen,
+		Front9SlopeRatingWomen:  intToInt64Ptr(in.Front9SlopeRatingWomen),
+		Back9CourseRatingWomen:  in.Back9CourseRatingWomen,
+		Back9SlopeRatingWomen:   intToInt64Ptr(in.Back9SlopeRatingWomen),
 		// total_yardage is derived from hole_tee_details on read, so the stored
 		// column stays null rather than holding a value that could go stale.
 		TotalYardage: nil,

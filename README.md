@@ -66,6 +66,20 @@ shared auth server:
 The frontend hides the Google button when these are unset, so the app runs fine
 without them.
 
+### Enabling the course map
+
+Course detail pages can embed a Google Map of the course's address:
+
+1. At the same [credentials console](https://console.cloud.google.com/apis/credentials),
+   create a key and enable the **Maps Embed API** for it. Restrict it to your
+   site's domain(s), since it ships inside the built frontend.
+2. Copy [web/.env.example](web/.env.example) to `web/.env` and set
+   `VITE_GOOGLE_MAPS_API_KEY`.
+
+This is a frontend build-time setting, unrelated to the Go server's environment
+variables above. Leave it unset to hide the map — the address and phone number
+on the detail page stay clickable either way.
+
 ## Architecture
 
 ```
@@ -132,7 +146,7 @@ All routes are under `/api`. Everything except the auth endpoints below requires
 | `GET` | `/courses?q=&limit=&offset=` | Paginated list with search |
 | `POST` | `/courses` | Create, optionally with tees and a hole count |
 | `GET` | `/courses/{id}` | Full detail: tees, holes, per-tee par and yardage |
-| `PUT` | `/courses/{id}` | Update name and address |
+| `PUT` | `/courses/{id}` | Update name, address, and phone number |
 | `DELETE` | `/courses/{id}` | Delete, cascading to tees, holes, and details |
 | `POST` | `/courses/{id}/tees` | Add a tee |
 | `PUT` `DELETE` | `/tees/{id}` | Update or delete a tee |

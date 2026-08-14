@@ -22,6 +22,7 @@ export interface CourseSummary {
   id: string
   name: string
   address: string | null
+  phone: string | null
   created_by: string
   created_at: string
   updated_at: string
@@ -35,8 +36,18 @@ export interface Tee {
   course_id: string
   name: string
   color: string
-  course_rating: number | null
-  slope_rating: number | null
+  course_rating_men: number | null
+  slope_rating_men: number | null
+  course_rating_women: number | null
+  slope_rating_women: number | null
+  front9_course_rating_men: number | null
+  front9_slope_rating_men: number | null
+  back9_course_rating_men: number | null
+  back9_slope_rating_men: number | null
+  front9_course_rating_women: number | null
+  front9_slope_rating_women: number | null
+  back9_course_rating_women: number | null
+  back9_slope_rating_women: number | null
   /** Derived server-side by summing the per-hole yardages for this tee. */
   total_yardage: number
   display_order: number
@@ -68,6 +79,24 @@ export interface CoursePage {
   offset: number
 }
 
+/**
+ * The full course, transferable between instances. Tees and holes are
+ * matched by name and number rather than ID, since IDs are not stable across
+ * app instances. Export and import share this shape.
+ */
+export interface CourseExport {
+  format_version: number
+  name: string
+  address: string | null
+  phone: string | null
+  tees: TeePayload[]
+  holes: Array<{
+    hole_number: number
+    handicap_index: number | null
+    tee_details: Array<{ tee_name: string; par: number; yardage: number }>
+  }>
+}
+
 export interface AuthConfig {
   google_enabled: boolean
 }
@@ -76,7 +105,17 @@ export interface AuthConfig {
 export interface TeePayload {
   name: string
   color: string
-  course_rating?: number | null
-  slope_rating?: number | null
+  course_rating_men?: number | null
+  slope_rating_men?: number | null
+  course_rating_women?: number | null
+  slope_rating_women?: number | null
+  front9_course_rating_men?: number | null
+  front9_slope_rating_men?: number | null
+  back9_course_rating_men?: number | null
+  back9_slope_rating_men?: number | null
+  front9_course_rating_women?: number | null
+  front9_slope_rating_women?: number | null
+  back9_course_rating_women?: number | null
+  back9_slope_rating_women?: number | null
   display_order?: number
 }

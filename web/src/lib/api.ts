@@ -1,6 +1,7 @@
 import type {
   AuthConfig,
   CourseDetail,
+  CourseExport,
   CoursePage,
   Hole,
   Session,
@@ -248,14 +249,24 @@ export const api = {
   createCourse: (payload: {
     name: string
     address?: string | null
+    phone?: string | null
     hole_count?: number
     tees?: TeePayload[]
   }) => request<CourseDetail>('/courses', { method: 'POST', body: payload }),
 
-  updateCourse: (id: string, payload: { name: string; address?: string | null }) =>
-    request<CourseDetail>(`/courses/${id}`, { method: 'PUT', body: payload }),
+  updateCourse: (
+    id: string,
+    payload: { name: string; address?: string | null; phone?: string | null },
+  ) => request<CourseDetail>(`/courses/${id}`, { method: 'PUT', body: payload }),
 
   deleteCourse: (id: string) => request<void>(`/courses/${id}`, { method: 'DELETE' }),
+
+  /** Fetches a course in the transferable shape used for backup/import. */
+  exportCourse: (id: string) => request<CourseExport>(`/courses/${id}/export`),
+
+  /** Recreates a course from a file previously produced by exportCourse. */
+  importCourse: (payload: CourseExport) =>
+    request<CourseDetail>('/courses/import', { method: 'POST', body: payload }),
 
   addTee: (courseId: string, payload: TeePayload) =>
     request<Tee>(`/courses/${courseId}/tees`, { method: 'POST', body: payload }),

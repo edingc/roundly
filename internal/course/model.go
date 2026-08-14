@@ -7,6 +7,7 @@ type Course struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
 	Address   *string `json:"address"`
+	Phone     *string `json:"phone"`
 	CreatedBy string  `json:"created_by"`
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
@@ -18,14 +19,30 @@ type Course struct {
 	TeeCount  int `json:"tee_count"`
 }
 
-// Tee is one set of tee boxes on a course.
+// Tee is one set of tee boxes on a course. Course and slope rating are tracked
+// separately per gender because that is how they are computed: the same
+// physical markers rate differently against the men's and women's scratch and
+// bogey golfer models, so a scorecard lists both for one tee. Front9 and Back9
+// ratings are separate from the 18-hole rating (not simply half of it) because
+// that is how USGA course and slope ratings work, and a 9-hole round posts to
+// a handicap using the matching 9-hole rating rather than the 18-hole one.
 type Tee struct {
-	ID           string   `json:"id"`
-	CourseID     string   `json:"course_id"`
-	Name         string   `json:"name"`
-	Color        string   `json:"color"`
-	CourseRating *float64 `json:"course_rating"`
-	SlopeRating  *int     `json:"slope_rating"`
+	ID                      string   `json:"id"`
+	CourseID                string   `json:"course_id"`
+	Name                    string   `json:"name"`
+	Color                   string   `json:"color"`
+	CourseRatingMen         *float64 `json:"course_rating_men"`
+	SlopeRatingMen          *int     `json:"slope_rating_men"`
+	CourseRatingWomen       *float64 `json:"course_rating_women"`
+	SlopeRatingWomen        *int     `json:"slope_rating_women"`
+	Front9CourseRatingMen   *float64 `json:"front9_course_rating_men"`
+	Front9SlopeRatingMen    *int     `json:"front9_slope_rating_men"`
+	Back9CourseRatingMen    *float64 `json:"back9_course_rating_men"`
+	Back9SlopeRatingMen     *int     `json:"back9_slope_rating_men"`
+	Front9CourseRatingWomen *float64 `json:"front9_course_rating_women"`
+	Front9SlopeRatingWomen  *int     `json:"front9_slope_rating_women"`
+	Back9CourseRatingWomen  *float64 `json:"back9_course_rating_women"`
+	Back9SlopeRatingWomen   *int     `json:"back9_slope_rating_women"`
 	// TotalYardage is derived from the per-hole yardages rather than stored
 	// independently, so it cannot drift from the grid.
 	TotalYardage int `json:"total_yardage"`
@@ -70,6 +87,7 @@ func toCourse(row sqlc.Course, viewerID string) Course {
 		ID:        row.ID,
 		Name:      row.Name,
 		Address:   row.Address,
+		Phone:     row.Phone,
 		CreatedBy: row.CreatedBy,
 		CreatedAt: row.CreatedAt,
 		UpdatedAt: row.UpdatedAt,
@@ -78,20 +96,34 @@ func toCourse(row sqlc.Course, viewerID string) Course {
 }
 
 func toTee(row sqlc.Tee, totalYardage int) Tee {
-	tee := Tee{
-		ID:           row.ID,
-		CourseID:     row.CourseID,
-		Name:         row.Name,
-		Color:        row.Color,
-		CourseRating: row.CourseRating,
-		TotalYardage: totalYardage,
-		DisplayOrder: int(row.DisplayOrder),
+	return Tee{
+		ID:                      row.ID,
+		CourseID:                row.CourseID,
+		Name:                    row.Name,
+		Color:                   row.Color,
+		CourseRatingMen:         row.CourseRatingMen,
+		SlopeRatingMen:          int64PtrToIntPtr(row.SlopeRatingMen),
+		CourseRatingWomen:       row.CourseRatingWomen,
+		SlopeRatingWomen:        int64PtrToIntPtr(row.SlopeRatingWomen),
+		Front9CourseRatingMen:   row.Front9CourseRatingMen,
+		Front9SlopeRatingMen:    int64PtrToIntPtr(row.Front9SlopeRatingMen),
+		Back9CourseRatingMen:    row.Back9CourseRatingMen,
+		Back9SlopeRatingMen:     int64PtrToIntPtr(row.Back9SlopeRatingMen),
+		Front9CourseRatingWomen: row.Front9CourseRatingWomen,
+		Front9SlopeRatingWomen:  int64PtrToIntPtr(row.Front9SlopeRatingWomen),
+		Back9CourseRatingWomen:  row.Back9CourseRatingWomen,
+		Back9SlopeRatingWomen:   int64PtrToIntPtr(row.Back9SlopeRatingWomen),
+		TotalYardage:            totalYardage,
+		DisplayOrder:            int(row.DisplayOrder),
 	}
-	if row.SlopeRating != nil {
-		slope := int(*row.SlopeRating)
-		tee.SlopeRating = &slope
+}
+
+func int64PtrToIntPtr(v *int64) *int {
+	if v == nil {
+		return nil
 	}
-	return tee
+	converted := int(*v)
+	return &converted
 }
 
 func toHole(row sqlc.Hole, details []TeeDetail) Hole {

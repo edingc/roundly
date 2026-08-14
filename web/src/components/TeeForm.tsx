@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Tee, TeePayload } from '../types'
-import { Alert, Field, Spinner } from './ui'
+import { Alert, Field, Spinner, cx } from './ui'
 
 /** Presets cover the common cases; the color input allows anything else. */
 const COLOR_PRESETS = [
@@ -15,33 +15,155 @@ const COLOR_PRESETS = [
 export interface TeeFormValues {
   name: string
   color: string
-  courseRating: string
-  slopeRating: string
+  courseRatingMen: string
+  slopeRatingMen: string
+  courseRatingWomen: string
+  slopeRatingWomen: string
+  front9CourseRatingMen: string
+  front9SlopeRatingMen: string
+  back9CourseRatingMen: string
+  back9SlopeRatingMen: string
+  front9CourseRatingWomen: string
+  front9SlopeRatingWomen: string
+  back9CourseRatingWomen: string
+  back9SlopeRatingWomen: string
 }
 
 export function emptyTeeForm(): TeeFormValues {
-  return { name: '', color: '#2563EB', courseRating: '', slopeRating: '' }
+  return {
+    name: '',
+    color: '#2563EB',
+    courseRatingMen: '',
+    slopeRatingMen: '',
+    courseRatingWomen: '',
+    slopeRatingWomen: '',
+    front9CourseRatingMen: '',
+    front9SlopeRatingMen: '',
+    back9CourseRatingMen: '',
+    back9SlopeRatingMen: '',
+    front9CourseRatingWomen: '',
+    front9SlopeRatingWomen: '',
+    back9CourseRatingWomen: '',
+    back9SlopeRatingWomen: '',
+  }
+}
+
+/** Renders a rating value for the form, leaving null as a blank string. */
+function ratingToForm(value: number | null): string {
+  return value === null ? '' : String(value)
 }
 
 export function teeToForm(tee: Tee): TeeFormValues {
   return {
     name: tee.name,
     color: tee.color,
-    courseRating: tee.course_rating === null ? '' : String(tee.course_rating),
-    slopeRating: tee.slope_rating === null ? '' : String(tee.slope_rating),
+    courseRatingMen: ratingToForm(tee.course_rating_men),
+    slopeRatingMen: ratingToForm(tee.slope_rating_men),
+    courseRatingWomen: ratingToForm(tee.course_rating_women),
+    slopeRatingWomen: ratingToForm(tee.slope_rating_women),
+    front9CourseRatingMen: ratingToForm(tee.front9_course_rating_men),
+    front9SlopeRatingMen: ratingToForm(tee.front9_slope_rating_men),
+    back9CourseRatingMen: ratingToForm(tee.back9_course_rating_men),
+    back9SlopeRatingMen: ratingToForm(tee.back9_slope_rating_men),
+    front9CourseRatingWomen: ratingToForm(tee.front9_course_rating_women),
+    front9SlopeRatingWomen: ratingToForm(tee.front9_slope_rating_women),
+    back9CourseRatingWomen: ratingToForm(tee.back9_course_rating_women),
+    back9SlopeRatingWomen: ratingToForm(tee.back9_slope_rating_women),
   }
+}
+
+/** Parses a trimmed form value to the API payload shape, leaving blanks as null. */
+function ratingToPayload(value: string): number | null {
+  const trimmed = value.trim()
+  return trimmed === '' ? null : Number(trimmed)
 }
 
 /** Converts form strings to the API payload, leaving blanks as null. */
 export function teeFormToPayload(values: TeeFormValues): TeePayload {
-  const rating = values.courseRating.trim()
-  const slope = values.slopeRating.trim()
   return {
     name: values.name.trim(),
     color: values.color,
-    course_rating: rating === '' ? null : Number(rating),
-    slope_rating: slope === '' ? null : Number(slope),
+    course_rating_men: ratingToPayload(values.courseRatingMen),
+    slope_rating_men: ratingToPayload(values.slopeRatingMen),
+    course_rating_women: ratingToPayload(values.courseRatingWomen),
+    slope_rating_women: ratingToPayload(values.slopeRatingWomen),
+    front9_course_rating_men: ratingToPayload(values.front9CourseRatingMen),
+    front9_slope_rating_men: ratingToPayload(values.front9SlopeRatingMen),
+    back9_course_rating_men: ratingToPayload(values.back9CourseRatingMen),
+    back9_slope_rating_men: ratingToPayload(values.back9SlopeRatingMen),
+    front9_course_rating_women: ratingToPayload(values.front9CourseRatingWomen),
+    front9_slope_rating_women: ratingToPayload(values.front9SlopeRatingWomen),
+    back9_course_rating_women: ratingToPayload(values.back9CourseRatingWomen),
+    back9_slope_rating_women: ratingToPayload(values.back9SlopeRatingWomen),
   }
+}
+
+/** One row of a rating table: a period label plus its course rating and slope inputs. */
+function RatingRow({
+  idPrefix,
+  label,
+  courseValue,
+  courseError,
+  courseMin,
+  courseMax,
+  coursePlaceholder,
+  onCourseChange,
+  slopeValue,
+  slopeError,
+  onSlopeChange,
+  slopePlaceholder,
+}: {
+  idPrefix: string
+  label: string
+  courseValue: string
+  courseError?: string
+  courseMin: number
+  courseMax: number
+  coursePlaceholder: string
+  onCourseChange: (value: string) => void
+  slopeValue: string
+  slopeError?: string
+  onSlopeChange: (value: string) => void
+  slopePlaceholder: string
+}) {
+  return (
+    <div className="grid grid-cols-[3.5rem_1fr_1fr] items-start gap-2">
+      <span className="pt-2.5 text-xs font-medium text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
+      <div>
+        <input
+          id={`${idPrefix}-rating`}
+          type="number"
+          inputMode="decimal"
+          step="0.1"
+          min={courseMin}
+          max={courseMax}
+          value={courseValue}
+          onChange={(e) => onCourseChange(e.target.value)}
+          className={cx('input', courseError && 'input-error')}
+          aria-label={`${label} course rating`}
+          placeholder={coursePlaceholder}
+        />
+        {courseError && <p className="field-error">{courseError}</p>}
+      </div>
+      <div>
+        <input
+          id={`${idPrefix}-slope`}
+          type="number"
+          inputMode="numeric"
+          min={55}
+          max={155}
+          value={slopeValue}
+          onChange={(e) => onSlopeChange(e.target.value)}
+          className={cx('input', slopeError && 'input-error')}
+          aria-label={`${label} slope rating`}
+          placeholder={slopePlaceholder}
+        />
+        {slopeError && <p className="field-error">{slopeError}</p>}
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -118,32 +240,110 @@ export function TeeFields({
         {errors.color && <p className="field-error">{errors.color}</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <Field
-          id={`${idPrefix}-rating`}
-          label="Course rating"
-          type="number"
-          inputMode="decimal"
-          step="0.1"
-          min="50"
-          max="90"
-          value={values.courseRating}
-          onChange={(e) => update('courseRating', e.target.value)}
-          error={errors.course_rating}
-          placeholder="72.4"
-        />
-        <Field
-          id={`${idPrefix}-slope`}
-          label="Slope"
-          type="number"
-          inputMode="numeric"
-          min="55"
-          max="155"
-          value={values.slopeRating}
-          onChange={(e) => update('slopeRating', e.target.value)}
-          error={errors.slope_rating}
-          placeholder="135"
-        />
+      <div>
+        <p className="label">Men's rating</p>
+        <div className="space-y-2">
+          <div className="grid grid-cols-[3.5rem_1fr_1fr] gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span />
+            <span>Course rating</span>
+            <span>Slope</span>
+          </div>
+          <RatingRow
+            idPrefix={`${idPrefix}-men-18`}
+            label="18 holes"
+            courseValue={values.courseRatingMen}
+            courseError={errors.course_rating_men}
+            courseMin={50}
+            courseMax={90}
+            coursePlaceholder="72.4"
+            onCourseChange={(v) => update('courseRatingMen', v)}
+            slopeValue={values.slopeRatingMen}
+            slopeError={errors.slope_rating_men}
+            onSlopeChange={(v) => update('slopeRatingMen', v)}
+            slopePlaceholder="135"
+          />
+          <RatingRow
+            idPrefix={`${idPrefix}-men-front9`}
+            label="Front 9"
+            courseValue={values.front9CourseRatingMen}
+            courseError={errors.front9_course_rating_men}
+            courseMin={25}
+            courseMax={45}
+            coursePlaceholder="35.8"
+            onCourseChange={(v) => update('front9CourseRatingMen', v)}
+            slopeValue={values.front9SlopeRatingMen}
+            slopeError={errors.front9_slope_rating_men}
+            onSlopeChange={(v) => update('front9SlopeRatingMen', v)}
+            slopePlaceholder="133"
+          />
+          <RatingRow
+            idPrefix={`${idPrefix}-men-back9`}
+            label="Back 9"
+            courseValue={values.back9CourseRatingMen}
+            courseError={errors.back9_course_rating_men}
+            courseMin={25}
+            courseMax={45}
+            coursePlaceholder="36.6"
+            onCourseChange={(v) => update('back9CourseRatingMen', v)}
+            slopeValue={values.back9SlopeRatingMen}
+            slopeError={errors.back9_slope_rating_men}
+            onSlopeChange={(v) => update('back9SlopeRatingMen', v)}
+            slopePlaceholder="137"
+          />
+        </div>
+      </div>
+
+      <div>
+        <p className="label">Women's rating</p>
+        <div className="space-y-2">
+          <div className="grid grid-cols-[3.5rem_1fr_1fr] gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span />
+            <span>Course rating</span>
+            <span>Slope</span>
+          </div>
+          <RatingRow
+            idPrefix={`${idPrefix}-women-18`}
+            label="18 holes"
+            courseValue={values.courseRatingWomen}
+            courseError={errors.course_rating_women}
+            courseMin={50}
+            courseMax={90}
+            coursePlaceholder="74.8"
+            onCourseChange={(v) => update('courseRatingWomen', v)}
+            slopeValue={values.slopeRatingWomen}
+            slopeError={errors.slope_rating_women}
+            onSlopeChange={(v) => update('slopeRatingWomen', v)}
+            slopePlaceholder="140"
+          />
+          <RatingRow
+            idPrefix={`${idPrefix}-women-front9`}
+            label="Front 9"
+            courseValue={values.front9CourseRatingWomen}
+            courseError={errors.front9_course_rating_women}
+            courseMin={25}
+            courseMax={45}
+            coursePlaceholder="37.0"
+            onCourseChange={(v) => update('front9CourseRatingWomen', v)}
+            slopeValue={values.front9SlopeRatingWomen}
+            slopeError={errors.front9_slope_rating_women}
+            onSlopeChange={(v) => update('front9SlopeRatingWomen', v)}
+            slopePlaceholder="138"
+          />
+          <RatingRow
+            idPrefix={`${idPrefix}-women-back9`}
+            label="Back 9"
+            courseValue={values.back9CourseRatingWomen}
+            courseError={errors.back9_course_rating_women}
+            courseMin={25}
+            courseMax={45}
+            coursePlaceholder="37.8"
+            onCourseChange={(v) => update('back9CourseRatingWomen', v)}
+            slopeValue={values.back9SlopeRatingWomen}
+            slopeError={errors.back9_slope_rating_women}
+            onSlopeChange={(v) => update('back9SlopeRatingWomen', v)}
+            slopePlaceholder="142"
+          />
+        </div>
       </div>
     </div>
   )

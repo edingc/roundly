@@ -11,6 +11,7 @@ type Course struct {
 	CreatedBy string
 	CreatedAt string
 	UpdatedAt string
+	Phone     *string
 }
 
 type Hole struct {
@@ -47,14 +48,24 @@ type RefreshToken struct {
 }
 
 type Tee struct {
-	ID           string
-	CourseID     string
-	Name         string
-	Color        string
-	CourseRating *float64
-	SlopeRating  *int64
-	TotalYardage *int64
-	DisplayOrder int64
+	ID                      string
+	CourseID                string
+	Name                    string
+	Color                   string
+	CourseRatingMen         *float64
+	SlopeRatingMen          *int64
+	TotalYardage            *int64
+	DisplayOrder            int64
+	CourseRatingWomen       *float64
+	SlopeRatingWomen        *int64
+	Front9CourseRatingMen   *float64
+	Front9SlopeRatingMen    *int64
+	Back9CourseRatingMen    *float64
+	Back9SlopeRatingMen     *int64
+	Front9CourseRatingWomen *float64
+	Front9SlopeRatingWomen  *int64
+	Back9CourseRatingWomen  *float64
+	Back9SlopeRatingWomen   *int64
 }
 
 type User struct {

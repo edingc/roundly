@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { InputHTMLAttributes, ReactNode } from 'react'
 
 /** Joins class names, dropping falsy entries. */
@@ -88,6 +89,77 @@ export function Field({ label, error, hint, id, className, ...rest }: FieldProps
   )
 }
 
+/**
+ * A modal that requires an explicit confirm click before a destructive action
+ * runs, so nothing is deleted from a single accidental tap.
+ */
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel = 'Delete',
+  danger = true,
+  onCancel,
+  onConfirm,
+}: {
+  title: string
+  message: ReactNode
+  confirmLabel?: string
+  danger?: boolean
+  onCancel: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const [confirming, setConfirming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleConfirm() {
+    setConfirming(true)
+    setError(null)
+    try {
+      await onConfirm()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'That could not be completed.')
+      setConfirming(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-30 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="alertdialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div className="card max-h-[90vh] w-full max-w-md overflow-y-auto rounded-b-none p-6 sm:rounded-xl">
+        <h2 className="mb-2 text-lg font-semibold">{title}</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400">{message}</p>
+        {error && (
+          <div className="mt-4">
+            <Alert>{error}</Alert>
+          </div>
+        )}
+        <div className="mt-6 flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={confirming}
+            className="btn-secondary flex-1"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleConfirm()}
+            disabled={confirming}
+            className={cx('flex-1', danger ? 'btn-danger' : 'btn-primary')}
+          >
+            {confirming ? <Spinner label="Working" /> : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** An empty-state block for lists with nothing in them. */
 export function EmptyState({
   title,
@@ -139,14 +211,58 @@ export function TeeChip({
   )
 }
 
+// export function FlagIcon({ className }: { className?: string }) {
+//   return (
+//     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+//       <path strokeLinecap="round" strokeLinejoin="round" d="M5 21V4m0 0l10 3-10 3" />
+//       <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l10 3 4-3-4-3" opacity="0.5" />
+//     </svg>
+//   )
+// }
+
 export function FlagIcon({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 21V4m0 0l10 3-10 3" />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M5 10l10 3 4-3-4-3" opacity="0.5" />
+    <svg
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 512 512"
+      role="img"
+      aria-label="Roundly"
+    >
+      <rect
+        width="512"
+        height="512"
+        rx="112"
+        fill="oklch(0.54 0.15 150)"
+      />
+
+      <g
+        stroke="#ffffff"
+        strokeWidth="26"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      >
+        <path d="M170 400V128" />
+        <path
+          d="M170 128l150 46-150 46z"
+          fill="#facc15"
+          stroke="#facc15"
+        />
+      </g>
+
+      <circle cx="300" cy="392" r="34" fill="#ffffff" />
+
+      <g fill="oklch(0.54 0.15 150)">
+        <circle cx="290" cy="382" r="4" />
+        <circle cx="304" cy="384" r="4" />
+        <circle cx="297" cy="396" r="4" />
+        <circle cx="311" cy="398" r="4" />
+      </g>
     </svg>
   )
 }
+
 
 export function GoogleIcon({ className }: { className?: string }) {
   return (
@@ -224,6 +340,22 @@ export function SearchIcon({ className }: { className?: string }) {
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <circle cx="11" cy="11" r="7" />
       <path strokeLinecap="round" d="M20 20l-3.5-3.5" />
+    </svg>
+  )
+}
+
+export function DownloadIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v11m0 0l-4-4m4 4l4-4M4 19h16" />
+    </svg>
+  )
+}
+
+export function UploadIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 15V4m0 0l-4 4m4-4l4 4M4 19h16" />
     </svg>
   )
 }

@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
+import { formatPhone, phoneHref } from '../lib/phone'
+import { slugify } from '../lib/slug'
 import type { CourseDetail, Tee, TeePayload } from '../types'
 import { ScorecardGrid } from '../components/ScorecardGrid'
 import { TeeDialog, emptyTeeForm, teeToForm } from '../components/TeeForm'
 import {
   Alert,
   ChevronLeftIcon,
+  ConfirmDialog,
+  DownloadIcon,
   Field,
   PageSpinner,
   PlusIcon,
@@ -14,6 +18,34 @@ import {
   TrashIcon,
   cx,
 } from '../components/ui'
+
+/**
+ * Set at build time. Leave unset to hide the map rather than embed a broken
+ * iframe — the same "hide the feature" fallback the Google sign-in button uses.
+ */
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+
+function mapsEmbedUrl(address: string): string {
+  return `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(address)}&maptype=satellite`
+}
+
+function mapsSearchUrl(address: string): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+}
+
+/** Builds e.g. "M 72.4/135 · W 74.8/140", omitting a gender with no rating set. */
+function formatRatings(tee: Tee): string {
+  const parts: string[] = []
+  if (tee.course_rating_men !== null) {
+    parts.push(`M ${tee.course_rating_men}${tee.slope_rating_men !== null ? `/${tee.slope_rating_men}` : ''}`)
+  }
+  if (tee.course_rating_women !== null) {
+    parts.push(
+      `W ${tee.course_rating_women}${tee.slope_rating_women !== null ? `/${tee.slope_rating_women}` : ''}`,
+    )
+  }
+  return parts.join(' · ')
+}
 
 export default function CourseDetailPage() {
   const { courseId } = useParams<{ courseId: string }>()
@@ -26,14 +58,17 @@ export default function CourseDetailPage() {
   const [editingDetails, setEditingDetails] = useState(false)
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
+  const [phone, setPhone] = useState('')
   const [savingDetails, setSavingDetails] = useState(false)
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({})
 
   const [teeDialog, setTeeDialog] = useState<{ mode: 'add' } | { mode: 'edit'; tee: Tee } | null>(
     null,
   )
+  const [confirmDeleteTee, setConfirmDeleteTee] = useState<Tee | null>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async () => {
     if (!courseId) return
@@ -42,6 +77,7 @@ export default function CourseDetailPage() {
       setCourse(detail)
       setName(detail.name)
       setAddress(detail.address ?? '')
+      setPhone(detail.phone ?? '')
       setError(null)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not load this course.')
@@ -63,6 +99,7 @@ export default function CourseDetailPage() {
       const updated = await api.updateCourse(courseId, {
         name,
         address: address.trim() === '' ? null : address,
+        phone: phone.trim() === '' ? null : formatPhone(phone),
       })
       setCourse(updated)
       setEditingDetails(false)
@@ -83,11 +120,35 @@ export default function CourseDetailPage() {
   }
 
   async function handleDeleteTee(tee: Tee) {
+    await api.deleteTee(tee.id)
+    await load()
+  }
+
+  /**
+   * Downloads the course as pretty-printed JSON. This has to fetch and build
+   * a blob URL rather than link straight to the API route: the export
+   * endpoint is authenticated, and a plain browser navigation cannot carry
+   * the Bearer header (see startGoogleLink in lib/api.ts for the same issue).
+   */
+  async function handleExport() {
+    if (!courseId) return
+    setExporting(true)
     try {
-      await api.deleteTee(tee.id)
-      await load()
+      const data = await api.exportCourse(courseId)
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      try {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `${slugify(data.name)}.json`
+        a.click()
+      } finally {
+        URL.revokeObjectURL(url)
+      }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not delete the tee.')
+      setError(err instanceof ApiError ? err.message : 'Could not export this course.')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -151,6 +212,15 @@ export default function CourseDetailPage() {
             maxLength={240}
             placeholder="Optional"
           />
+          <Field
+            label="Phone number"
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            error={detailErrors.phone}
+            maxLength={30}
+            placeholder="Optional"
+          />
           <div className="flex gap-2">
             <button
               type="button"
@@ -159,6 +229,7 @@ export default function CourseDetailPage() {
                 setEditingDetails(false)
                 setName(course.name)
                 setAddress(course.address ?? '')
+                setPhone(course.phone ?? '')
                 setDetailErrors({})
               }}
             >
@@ -174,7 +245,26 @@ export default function CourseDetailPage() {
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight break-words">{course.name}</h1>
             {course.address && (
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{course.address}</p>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                <a
+                  href={mapsSearchUrl(course.address)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-400"
+                >
+                  {course.address}
+                </a>
+              </p>
+            )}
+            {course.phone && (
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
+                <a
+                  href={phoneHref(course.phone)}
+                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-400"
+                >
+                  {formatPhone(course.phone)}
+                </a>
+              </p>
             )}
             {!editable && (
               <p className="mt-2 inline-block rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
@@ -182,16 +272,43 @@ export default function CourseDetailPage() {
               </p>
             )}
           </div>
-          {editable && (
+          <div className="ml-auto flex gap-2">
             <button
               type="button"
-              className="btn-secondary ml-auto"
-              onClick={() => setEditingDetails(true)}
+              className="btn-secondary"
+              disabled={exporting}
+              onClick={() => void handleExport()}
             >
-              Edit details
+              {exporting ? (
+                <Spinner label="Exporting" />
+              ) : (
+                <>
+                  <DownloadIcon className="size-4" />
+                  Export
+                </>
+              )}
             </button>
-          )}
+            {editable && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setEditingDetails(true)}
+              >
+                Edit details
+              </button>
+            )}
+          </div>
         </div>
+      )}
+
+      {course.address && GOOGLE_MAPS_API_KEY && (
+        <iframe
+          title={`Map of ${course.name}`}
+          src={mapsEmbedUrl(course.address)}
+          className="block h-64 w-full rounded-xl border-0"
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+        />
       )}
 
       {/* Tees */}
@@ -216,49 +333,48 @@ export default function CourseDetailPage() {
           </div>
         ) : (
           <ul className="flex flex-wrap gap-2">
-            {course.tees.map((tee) => (
-              <li
-                key={tee.id}
-                className={cx(
-                  'card flex items-center gap-3 px-3 py-2',
-                  editable && 'pr-2',
-                )}
-              >
-                <span
-                  aria-hidden="true"
-                  className="size-4 shrink-0 rounded-full ring-1 ring-black/15 dark:ring-white/25"
-                  style={{ backgroundColor: tee.color }}
-                />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{tee.name}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    {tee.total_yardage > 0 ? `${tee.total_yardage} yds` : 'No yardages yet'}
-                    {tee.course_rating !== null && ` · ${tee.course_rating}`}
-                    {tee.slope_rating !== null && ` / ${tee.slope_rating}`}
-                  </p>
-                </div>
-                {editable && (
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      className="btn-ghost !min-h-0 !px-2 !py-1 text-xs"
-                      onClick={() => setTeeDialog({ mode: 'edit', tee })}
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost !min-h-0 !px-2 !py-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950"
-                      onClick={() => void handleDeleteTee(tee)}
-                      aria-label={`Delete the ${tee.name} tee`}
-                      title={`Delete the ${tee.name} tee`}
-                    >
-                      <TrashIcon className="size-4" />
-                    </button>
+            {course.tees.map((tee) => {
+              const ratings = formatRatings(tee)
+              return (
+                <li
+                  key={tee.id}
+                  className={cx('card flex items-center gap-3 px-3 py-2', editable && 'pr-2')}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="size-4 shrink-0 rounded-full ring-1 ring-black/15 dark:ring-white/25"
+                    style={{ backgroundColor: tee.color }}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{tee.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {tee.total_yardage > 0 ? `${tee.total_yardage} yds` : 'No yardages yet'}
+                      {ratings !== '' && ` · ${ratings}`}
+                    </p>
                   </div>
-                )}
-              </li>
-            ))}
+                  {editable && (
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        className="btn-ghost !min-h-0 !px-2 !py-1 text-xs"
+                        onClick={() => setTeeDialog({ mode: 'edit', tee })}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-ghost !min-h-0 !px-2 !py-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950"
+                        onClick={() => setConfirmDeleteTee(tee)}
+                        aria-label={`Delete the ${tee.name} tee`}
+                        title={`Delete the ${tee.name} tee`}
+                      >
+                        <TrashIcon className="size-4" />
+                      </button>
+                    </div>
+                  )}
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>
@@ -315,6 +431,19 @@ export default function CourseDetailPage() {
           submitLabel={teeDialog.mode === 'add' ? 'Add tee' : 'Save tee'}
           onCancel={() => setTeeDialog(null)}
           onSubmit={handleTeeSubmit}
+        />
+      )}
+
+      {confirmDeleteTee && (
+        <ConfirmDialog
+          title={`Delete the ${confirmDeleteTee.name} tee?`}
+          message="This also removes every par and yardage recorded for it."
+          confirmLabel="Delete tee"
+          onCancel={() => setConfirmDeleteTee(null)}
+          onConfirm={async () => {
+            await handleDeleteTee(confirmDeleteTee)
+            setConfirmDeleteTee(null)
+          }}
         />
       )}
     </div>

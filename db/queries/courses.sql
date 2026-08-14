@@ -1,6 +1,6 @@
 -- name: CreateCourse :exec
-INSERT INTO courses (id, name, address, created_by, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?);
+INSERT INTO courses (id, name, address, phone, created_by, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetCourse :one
 SELECT * FROM courses WHERE id = ?;
@@ -30,7 +30,7 @@ WHERE instr(lower(name), sqlc.arg(query)) > 0
    OR instr(lower(IFNULL(address, '')), sqlc.arg(query)) > 0;
 
 -- name: UpdateCourse :exec
-UPDATE courses SET name = ?, address = ?, updated_at = ? WHERE id = ?;
+UPDATE courses SET name = ?, address = ?, phone = ?, updated_at = ? WHERE id = ?;
 
 -- name: TouchCourse :exec
 UPDATE courses SET updated_at = ? WHERE id = ?;

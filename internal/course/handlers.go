@@ -1,9 +1,12 @@
 package course
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -23,6 +26,16 @@ const (
 	maxCourseRating = 90.0
 	minSlopeRating  = 55
 	maxSlopeRating  = 155
+
+	// Front9/back9 course ratings estimate strokes over half as many holes, so
+	// they run roughly half the 18-hole range. Slope rating is a relative
+	// difficulty measure independent of hole count, so it keeps the same range.
+	minCourseRating9 = 25.0
+	maxCourseRating9 = 45.0
+
+	// minAddressLen is a floor for a plausible street address, low enough not
+	// to reject a real short one, high enough to catch a stray "n/a" or "-".
+	minAddressLen = 4
 )
 
 // Handler exposes the course directory endpoints.
@@ -45,11 +58,13 @@ func (h *Handler) Register(r chi.Router) {
 	r.Route("/courses", func(cr chi.Router) {
 		cr.Get("/", h.list)
 		cr.Post("/", h.create)
+		cr.Post("/import", h.importCourse)
 
 		cr.Route("/{courseID}", func(dr chi.Router) {
 			dr.Get("/", h.get)
 			dr.Put("/", h.update)
 			dr.Delete("/", h.delete)
+			dr.Get("/export", h.export)
 			dr.Post("/tees", h.addTee)
 			dr.Post("/holes", h.addHole)
 		})
@@ -93,16 +108,27 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 type teeRequest struct {
-	Name         string   `json:"name"`
-	Color        string   `json:"color"`
-	CourseRating *float64 `json:"course_rating"`
-	SlopeRating  *int     `json:"slope_rating"`
-	DisplayOrder *int     `json:"display_order"`
+	Name                    string   `json:"name"`
+	Color                   string   `json:"color"`
+	CourseRatingMen         *float64 `json:"course_rating_men"`
+	SlopeRatingMen          *int     `json:"slope_rating_men"`
+	CourseRatingWomen       *float64 `json:"course_rating_women"`
+	SlopeRatingWomen        *int     `json:"slope_rating_women"`
+	Front9CourseRatingMen   *float64 `json:"front9_course_rating_men"`
+	Front9SlopeRatingMen    *int     `json:"front9_slope_rating_men"`
+	Back9CourseRatingMen    *float64 `json:"back9_course_rating_men"`
+	Back9SlopeRatingMen     *int     `json:"back9_slope_rating_men"`
+	Front9CourseRatingWomen *float64 `json:"front9_course_rating_women"`
+	Front9SlopeRatingWomen  *int     `json:"front9_slope_rating_women"`
+	Back9CourseRatingWomen  *float64 `json:"back9_course_rating_women"`
+	Back9SlopeRatingWomen   *int     `json:"back9_slope_rating_women"`
+	DisplayOrder            *int     `json:"display_order"`
 }
 
 type createCourseRequest struct {
 	Name      string       `json:"name"`
 	Address   *string      `json:"address"`
+	Phone     *string      `json:"phone"`
 	HoleCount int          `json:"hole_count"`
 	Tees      []teeRequest `json:"tees"`
 }
@@ -115,7 +141,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address)
+	validateCourseFields(v, req.Name, req.Address, req.Phone)
 
 	// Nine- and eighteen-hole courses are the realistic cases, and the holes
 	// table CHECK constraint caps hole numbers at 18 either way.
@@ -136,6 +162,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	detail, err := h.service.Create(ctx, auth.MustUserID(ctx), CreateCourseInput{
 		Name:      req.Name,
 		Address:   req.Address,
+		Phone:     req.Phone,
 		HoleCount: req.HoleCount,
 		Tees:      tees,
 	})
@@ -149,6 +176,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 type updateCourseRequest struct {
 	Name    string  `json:"name"`
 	Address *string `json:"address"`
+	Phone   *string `json:"phone"`
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +187,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address)
+	validateCourseFields(v, req.Name, req.Address, req.Phone)
 	if err := v.Err(); err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -169,6 +197,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	detail, err := h.service.Update(ctx, auth.MustUserID(ctx), chi.URLParam(r, "courseID"), UpdateCourseInput{
 		Name:    req.Name,
 		Address: req.Address,
+		Phone:   req.Phone,
 	})
 	if err != nil {
 		httpx.Error(w, r, err)
@@ -358,12 +387,42 @@ func (h *Handler) clearTeeDetail(w http.ResponseWriter, r *http.Request) {
 	httpx.NoContent(w)
 }
 
-func validateCourseFields(v *httpx.Validator, name string, address *string) {
+func validateCourseFields(v *httpx.Validator, name string, address, phone *string) {
 	v.Required("name", name)
 	v.MaxLen("name", strings.TrimSpace(name), 120)
-	if address != nil {
-		v.MaxLen("address", strings.TrimSpace(*address), 240)
+	validateAddress(v, address)
+	if phone != nil {
+		v.MaxLen("phone", strings.TrimSpace(*phone), 30)
 	}
+}
+
+// validateAddress checks the shape of an address rather than whether the
+// place exists: a blank value clears the field (same as address/phone
+// elsewhere), so only a non-blank value gets checked.
+func validateAddress(v *httpx.Validator, address *string) {
+	if address == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(*address)
+	if trimmed == "" {
+		return
+	}
+	v.MaxLen("address", trimmed, 240)
+	switch {
+	case utf8.RuneCountInString(trimmed) < minAddressLen:
+		v.Add("address", "Enter a full address.")
+	case !containsLetter(trimmed):
+		v.Add("address", "Enter a valid address.")
+	}
+}
+
+func containsLetter(s string) bool {
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateTee(v *httpx.Validator, prefix string, req teeRequest) TeeInput {
@@ -374,22 +433,48 @@ func validateTee(v *httpx.Validator, prefix string, req teeRequest) TeeInput {
 	v.MaxLen(nameField, strings.TrimSpace(req.Name), 60)
 	color := v.HexColor(colorField, req.Color)
 
-	if req.CourseRating != nil {
-		rating := *req.CourseRating
-		if rating < minCourseRating || rating > maxCourseRating {
-			v.Add(joinField(prefix, "course_rating"), "Course rating is usually between 50 and 90.")
-		}
-	}
-	if req.SlopeRating != nil {
-		v.IntBetween(joinField(prefix, "slope_rating"), *req.SlopeRating, minSlopeRating, maxSlopeRating)
-	}
+	validateCourseRating(v, joinField(prefix, "course_rating_men"), req.CourseRatingMen, minCourseRating, maxCourseRating)
+	validateSlopeRating(v, joinField(prefix, "slope_rating_men"), req.SlopeRatingMen)
+	validateCourseRating(v, joinField(prefix, "course_rating_women"), req.CourseRatingWomen, minCourseRating, maxCourseRating)
+	validateSlopeRating(v, joinField(prefix, "slope_rating_women"), req.SlopeRatingWomen)
+
+	validateCourseRating(v, joinField(prefix, "front9_course_rating_men"), req.Front9CourseRatingMen, minCourseRating9, maxCourseRating9)
+	validateSlopeRating(v, joinField(prefix, "front9_slope_rating_men"), req.Front9SlopeRatingMen)
+	validateCourseRating(v, joinField(prefix, "back9_course_rating_men"), req.Back9CourseRatingMen, minCourseRating9, maxCourseRating9)
+	validateSlopeRating(v, joinField(prefix, "back9_slope_rating_men"), req.Back9SlopeRatingMen)
+	validateCourseRating(v, joinField(prefix, "front9_course_rating_women"), req.Front9CourseRatingWomen, minCourseRating9, maxCourseRating9)
+	validateSlopeRating(v, joinField(prefix, "front9_slope_rating_women"), req.Front9SlopeRatingWomen)
+	validateCourseRating(v, joinField(prefix, "back9_course_rating_women"), req.Back9CourseRatingWomen, minCourseRating9, maxCourseRating9)
+	validateSlopeRating(v, joinField(prefix, "back9_slope_rating_women"), req.Back9SlopeRatingWomen)
 
 	return TeeInput{
-		Name:         req.Name,
-		Color:        color,
-		CourseRating: req.CourseRating,
-		SlopeRating:  req.SlopeRating,
-		DisplayOrder: req.DisplayOrder,
+		Name:                    req.Name,
+		Color:                   color,
+		CourseRatingMen:         req.CourseRatingMen,
+		SlopeRatingMen:          req.SlopeRatingMen,
+		CourseRatingWomen:       req.CourseRatingWomen,
+		SlopeRatingWomen:        req.SlopeRatingWomen,
+		Front9CourseRatingMen:   req.Front9CourseRatingMen,
+		Front9SlopeRatingMen:    req.Front9SlopeRatingMen,
+		Back9CourseRatingMen:    req.Back9CourseRatingMen,
+		Back9SlopeRatingMen:     req.Back9SlopeRatingMen,
+		Front9CourseRatingWomen: req.Front9CourseRatingWomen,
+		Front9SlopeRatingWomen:  req.Front9SlopeRatingWomen,
+		Back9CourseRatingWomen:  req.Back9CourseRatingWomen,
+		Back9SlopeRatingWomen:   req.Back9SlopeRatingWomen,
+		DisplayOrder:            req.DisplayOrder,
+	}
+}
+
+func validateCourseRating(v *httpx.Validator, field string, rating *float64, min, max float64) {
+	if rating != nil && (*rating < min || *rating > max) {
+		v.Add(field, fmt.Sprintf("Course rating is usually between %g and %g.", min, max))
+	}
+}
+
+func validateSlopeRating(v *httpx.Validator, field string, slope *int) {
+	if slope != nil {
+		v.IntBetween(field, *slope, minSlopeRating, maxSlopeRating)
 	}
 }
 

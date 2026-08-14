@@ -62,8 +62,17 @@ func TestCreateCourseGeneratesHolesAndTees(t *testing.T) {
 	detail, err := svc.Create(ctx, owner, CreateCourseInput{
 		Name:    "  Pebble Ridge  ",
 		Address: ptr("  1 Fairway Dr  "),
+		Phone:   ptr("  (555) 123-4567  "),
 		Tees: []TeeInput{
-			{Name: "Championship", Color: "#FFD700", CourseRating: ptr(72.4), SlopeRating: ptr(135)},
+			{
+				Name: "Championship", Color: "#FFD700",
+				CourseRatingMen: ptr(72.4), SlopeRatingMen: ptr(135),
+				CourseRatingWomen: ptr(74.8), SlopeRatingWomen: ptr(140),
+				Front9CourseRatingMen: ptr(35.8), Front9SlopeRatingMen: ptr(133),
+				Back9CourseRatingMen: ptr(36.6), Back9SlopeRatingMen: ptr(137),
+				Front9CourseRatingWomen: ptr(37.0), Front9SlopeRatingWomen: ptr(138),
+				Back9CourseRatingWomen: ptr(37.8), Back9SlopeRatingWomen: ptr(142),
+			},
 			{Name: "Forward", Color: "#FF2D55"},
 		},
 	})
@@ -76,6 +85,9 @@ func TestCreateCourseGeneratesHolesAndTees(t *testing.T) {
 	}
 	if detail.Address == nil || *detail.Address != "1 Fairway Dr" {
 		t.Errorf("address = %v, want it trimmed", detail.Address)
+	}
+	if detail.Phone == nil || *detail.Phone != "(555) 123-4567" {
+		t.Errorf("phone = %v, want it trimmed", detail.Phone)
 	}
 	if len(detail.Holes) != DefaultHoleCount {
 		t.Errorf("holes = %d, want %d", len(detail.Holes), DefaultHoleCount)
@@ -90,6 +102,47 @@ func TestCreateCourseGeneratesHolesAndTees(t *testing.T) {
 	// display_order should follow the order supplied.
 	if detail.Tees[0].Name != "Championship" || detail.Tees[1].Name != "Forward" {
 		t.Errorf("tee order = %q, %q; want Championship, Forward", detail.Tees[0].Name, detail.Tees[1].Name)
+	}
+
+	// Course and slope rating are tracked separately per gender.
+	championship := detail.Tees[0]
+	if championship.CourseRatingMen == nil || *championship.CourseRatingMen != 72.4 {
+		t.Errorf("course_rating_men = %v, want 72.4", championship.CourseRatingMen)
+	}
+	if championship.SlopeRatingMen == nil || *championship.SlopeRatingMen != 135 {
+		t.Errorf("slope_rating_men = %v, want 135", championship.SlopeRatingMen)
+	}
+	if championship.CourseRatingWomen == nil || *championship.CourseRatingWomen != 74.8 {
+		t.Errorf("course_rating_women = %v, want 74.8", championship.CourseRatingWomen)
+	}
+	if championship.SlopeRatingWomen == nil || *championship.SlopeRatingWomen != 140 {
+		t.Errorf("slope_rating_women = %v, want 140", championship.SlopeRatingWomen)
+	}
+
+	// Front9/back9 ratings round-trip independently of the 18-hole rating.
+	if championship.Front9CourseRatingMen == nil || *championship.Front9CourseRatingMen != 35.8 {
+		t.Errorf("front9_course_rating_men = %v, want 35.8", championship.Front9CourseRatingMen)
+	}
+	if championship.Front9SlopeRatingMen == nil || *championship.Front9SlopeRatingMen != 133 {
+		t.Errorf("front9_slope_rating_men = %v, want 133", championship.Front9SlopeRatingMen)
+	}
+	if championship.Back9CourseRatingMen == nil || *championship.Back9CourseRatingMen != 36.6 {
+		t.Errorf("back9_course_rating_men = %v, want 36.6", championship.Back9CourseRatingMen)
+	}
+	if championship.Back9SlopeRatingMen == nil || *championship.Back9SlopeRatingMen != 137 {
+		t.Errorf("back9_slope_rating_men = %v, want 137", championship.Back9SlopeRatingMen)
+	}
+	if championship.Front9CourseRatingWomen == nil || *championship.Front9CourseRatingWomen != 37.0 {
+		t.Errorf("front9_course_rating_women = %v, want 37.0", championship.Front9CourseRatingWomen)
+	}
+	if championship.Front9SlopeRatingWomen == nil || *championship.Front9SlopeRatingWomen != 138 {
+		t.Errorf("front9_slope_rating_women = %v, want 138", championship.Front9SlopeRatingWomen)
+	}
+	if championship.Back9CourseRatingWomen == nil || *championship.Back9CourseRatingWomen != 37.8 {
+		t.Errorf("back9_course_rating_women = %v, want 37.8", championship.Back9CourseRatingWomen)
+	}
+	if championship.Back9SlopeRatingWomen == nil || *championship.Back9SlopeRatingWomen != 142 {
+		t.Errorf("back9_slope_rating_women = %v, want 142", championship.Back9SlopeRatingWomen)
 	}
 
 	// Holes come back in play order with a default stroke index.
@@ -115,6 +168,39 @@ func TestCreateNineHoleCourse(t *testing.T) {
 }
 
 // The case the schema exists to support: one hole, different par per tee.
+func TestUpdateCourseSetsAndClearsPhone(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	detail, err := svc.Create(ctx, owner, CreateCourseInput{Name: "Phone GC"})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	if detail.Phone != nil {
+		t.Errorf("phone = %v, want nil when not supplied", detail.Phone)
+	}
+
+	updated, err := svc.Update(ctx, owner, detail.ID, UpdateCourseInput{
+		Name:  detail.Name,
+		Phone: ptr("555-867-5309"),
+	})
+	if err != nil {
+		t.Fatalf("update course: %v", err)
+	}
+	if updated.Phone == nil || *updated.Phone != "555-867-5309" {
+		t.Errorf("phone = %v, want 555-867-5309", updated.Phone)
+	}
+
+	cleared, err := svc.Update(ctx, owner, detail.ID, UpdateCourseInput{Name: detail.Name})
+	if err != nil {
+		t.Fatalf("clear phone: %v", err)
+	}
+	if cleared.Phone != nil {
+		t.Errorf("phone = %v, want nil after clearing", cleared.Phone)
+	}
+}
+
 func TestSameHoleHasDifferentParPerTee(t *testing.T) {
 	svc, db := newTestService(t)
 	ctx := context.Background()
@@ -497,6 +583,63 @@ func TestAddHoleRejectsDuplicateNumber(t *testing.T) {
 	}
 }
 
+// Stroke index ranks holes by difficulty across the whole course, so two
+// holes sharing one is a data error even though each index is individually
+// in range.
+func TestAddHoleRejectsDuplicateHandicapIndex(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	// A nine-hole course gets holes 1-9 with handicap index 1-9 by default.
+	detail, err := svc.Create(ctx, owner, CreateCourseInput{Name: "SI GC", HoleCount: 9})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+
+	if _, err := svc.AddHole(ctx, owner, detail.ID, HoleInput{HoleNumber: 10, HandicapIndex: ptr(5)}); err == nil {
+		t.Error("a duplicate stroke index was accepted")
+	} else if status := statusOf(t, err); status != 409 {
+		t.Errorf("status = %d, want 409", status)
+	}
+
+	if _, err := svc.AddHole(ctx, owner, detail.ID, HoleInput{HoleNumber: 10, HandicapIndex: ptr(10)}); err != nil {
+		t.Errorf("adding hole 10 with a fresh stroke index failed: %v", err)
+	}
+}
+
+func TestUpdateHoleRejectsDuplicateHandicapIndex(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	detail, err := svc.Create(ctx, owner, CreateCourseInput{Name: "SI Update GC", HoleCount: 9})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	hole1, hole2 := detail.Holes[0], detail.Holes[1]
+
+	if _, err := svc.UpdateHole(ctx, owner, hole1.ID, HoleInput{HandicapIndex: ptr(2)}); err == nil {
+		t.Error("updating a hole to another hole's stroke index was accepted")
+	} else if status := statusOf(t, err); status != 409 {
+		t.Errorf("status = %d, want 409", status)
+	}
+
+	// Setting a hole's stroke index to the value it already has must not trip
+	// over itself as a false positive.
+	if _, err := svc.UpdateHole(ctx, owner, hole1.ID, HoleInput{HandicapIndex: ptr(1)}); err != nil {
+		t.Errorf("re-setting hole 1's own stroke index failed: %v", err)
+	}
+
+	// Clearing hole 2's stroke index frees it up for reuse.
+	if _, err := svc.UpdateHole(ctx, owner, hole2.ID, HoleInput{}); err != nil {
+		t.Fatalf("clear hole 2's stroke index: %v", err)
+	}
+	if _, err := svc.UpdateHole(ctx, owner, hole1.ID, HoleInput{HandicapIndex: ptr(2)}); err != nil {
+		t.Errorf("reusing the now-free stroke index failed: %v", err)
+	}
+}
+
 func TestGetMissingCourseIsNotFound(t *testing.T) {
 	svc, db := newTestService(t)
 	ctx := context.Background()
@@ -506,5 +649,101 @@ func TestGetMissingCourseIsNotFound(t *testing.T) {
 		t.Fatal("a missing course was returned")
 	} else if status := statusOf(t, err); status != 404 {
 		t.Errorf("status = %d, want 404", status)
+	}
+}
+
+// Import recreates a course from the same shape Export produces, matching
+// tees to hole details by name rather than ID, since IDs are not stable
+// across app instances.
+func TestImportRecreatesTeesAndHoleDetails(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	imported, err := svc.Import(ctx, owner, ImportCourseInput{
+		Name:    "  Imported GC  ",
+		Address: ptr("1 Fairway Dr"),
+		Tees: []TeeInput{
+			{Name: "Back", Color: "#000000", CourseRatingMen: ptr(72.4), SlopeRatingMen: ptr(135)},
+			{Name: "Forward", Color: "#FFFFFF"},
+		},
+		Holes: []ImportHoleInput{
+			{
+				HoleNumber:    1,
+				HandicapIndex: ptr(7),
+				TeeDetails: []ImportTeeDetailInput{
+					{TeeName: "Back", Par: 4, Yardage: 420},
+					{TeeName: "Forward", Par: 3, Yardage: 165},
+				},
+			},
+			{HoleNumber: 2, HandicapIndex: ptr(3)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("import course: %v", err)
+	}
+
+	if imported.Name != "Imported GC" {
+		t.Errorf("name = %q, want it trimmed", imported.Name)
+	}
+	if len(imported.Tees) != 2 || len(imported.Holes) != 2 {
+		t.Fatalf("tees = %d, holes = %d; want 2 and 2", len(imported.Tees), len(imported.Holes))
+	}
+
+	var backID, forwardID string
+	for _, tee := range imported.Tees {
+		switch tee.Name {
+		case "Back":
+			backID = tee.ID
+			if tee.CourseRatingMen == nil || *tee.CourseRatingMen != 72.4 {
+				t.Errorf("back course_rating_men = %v, want 72.4", tee.CourseRatingMen)
+			}
+		case "Forward":
+			forwardID = tee.ID
+		default:
+			t.Errorf("unexpected tee %q", tee.Name)
+		}
+	}
+
+	hole1 := imported.Holes[0]
+	if hole1.HoleNumber != 1 || hole1.HandicapIndex == nil || *hole1.HandicapIndex != 7 {
+		t.Fatalf("hole 1 = %+v, want number 1 and handicap 7", hole1)
+	}
+	pars := map[string]int{}
+	for _, d := range hole1.TeeDetails {
+		pars[d.TeeID] = d.Par
+	}
+	if pars[backID] != 4 {
+		t.Errorf("back tee par on hole 1 = %d, want 4", pars[backID])
+	}
+	if pars[forwardID] != 3 {
+		t.Errorf("forward tee par on hole 1 = %d, want 3", pars[forwardID])
+	}
+}
+
+// validateAddress checks shape, not whether the place exists: it should catch
+// obvious junk without rejecting a short-but-real address.
+func TestValidateAddressRejectsJunk(t *testing.T) {
+	cases := []struct {
+		name    string
+		address *string
+		wantErr bool
+	}{
+		{"not provided", nil, false},
+		{"blank clears the field", ptr(""), false},
+		{"whitespace-only clears the field", ptr("   "), false},
+		{"a real address passes", ptr("1600 Pennsylvania Ave"), false},
+		{"a short real address passes", ptr("221B Baker St"), false},
+		{"too short", ptr("12"), true},
+		{"digits only, no street name", ptr("12345"), true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			v := httpx.NewValidator()
+			validateAddress(v, tc.address)
+			if got := !v.Valid(); got != tc.wantErr {
+				t.Errorf("validateAddress(%v): rejected = %v, want %v", tc.address, got, tc.wantErr)
+			}
+		})
 	}
 }

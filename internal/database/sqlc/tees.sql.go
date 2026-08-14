@@ -10,19 +10,35 @@ import (
 )
 
 const createTee = `-- name: CreateTee :exec
-INSERT INTO tees (id, course_id, name, color, course_rating, slope_rating, total_yardage, display_order)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO tees (
+    id, course_id, name, color,
+    course_rating_men, slope_rating_men, course_rating_women, slope_rating_women,
+    front9_course_rating_men, front9_slope_rating_men, back9_course_rating_men, back9_slope_rating_men,
+    front9_course_rating_women, front9_slope_rating_women, back9_course_rating_women, back9_slope_rating_women,
+    total_yardage, display_order
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateTeeParams struct {
-	ID           string
-	CourseID     string
-	Name         string
-	Color        string
-	CourseRating *float64
-	SlopeRating  *int64
-	TotalYardage *int64
-	DisplayOrder int64
+	ID                      string
+	CourseID                string
+	Name                    string
+	Color                   string
+	CourseRatingMen         *float64
+	SlopeRatingMen          *int64
+	CourseRatingWomen       *float64
+	SlopeRatingWomen        *int64
+	Front9CourseRatingMen   *float64
+	Front9SlopeRatingMen    *int64
+	Back9CourseRatingMen    *float64
+	Back9SlopeRatingMen     *int64
+	Front9CourseRatingWomen *float64
+	Front9SlopeRatingWomen  *int64
+	Back9CourseRatingWomen  *float64
+	Back9SlopeRatingWomen   *int64
+	TotalYardage            *int64
+	DisplayOrder            int64
 }
 
 func (q *Queries) CreateTee(ctx context.Context, arg CreateTeeParams) error {
@@ -31,8 +47,18 @@ func (q *Queries) CreateTee(ctx context.Context, arg CreateTeeParams) error {
 		arg.CourseID,
 		arg.Name,
 		arg.Color,
-		arg.CourseRating,
-		arg.SlopeRating,
+		arg.CourseRatingMen,
+		arg.SlopeRatingMen,
+		arg.CourseRatingWomen,
+		arg.SlopeRatingWomen,
+		arg.Front9CourseRatingMen,
+		arg.Front9SlopeRatingMen,
+		arg.Back9CourseRatingMen,
+		arg.Back9SlopeRatingMen,
+		arg.Front9CourseRatingWomen,
+		arg.Front9SlopeRatingWomen,
+		arg.Back9CourseRatingWomen,
+		arg.Back9SlopeRatingWomen,
 		arg.TotalYardage,
 		arg.DisplayOrder,
 	)
@@ -49,7 +75,7 @@ func (q *Queries) DeleteTee(ctx context.Context, id string) error {
 }
 
 const getTee = `-- name: GetTee :one
-SELECT id, course_id, name, color, course_rating, slope_rating, total_yardage, display_order FROM tees WHERE id = ?
+SELECT id, course_id, name, color, course_rating_men, slope_rating_men, total_yardage, display_order, course_rating_women, slope_rating_women, front9_course_rating_men, front9_slope_rating_men, back9_course_rating_men, back9_slope_rating_men, front9_course_rating_women, front9_slope_rating_women, back9_course_rating_women, back9_slope_rating_women FROM tees WHERE id = ?
 `
 
 func (q *Queries) GetTee(ctx context.Context, id string) (Tee, error) {
@@ -60,16 +86,26 @@ func (q *Queries) GetTee(ctx context.Context, id string) (Tee, error) {
 		&i.CourseID,
 		&i.Name,
 		&i.Color,
-		&i.CourseRating,
-		&i.SlopeRating,
+		&i.CourseRatingMen,
+		&i.SlopeRatingMen,
 		&i.TotalYardage,
 		&i.DisplayOrder,
+		&i.CourseRatingWomen,
+		&i.SlopeRatingWomen,
+		&i.Front9CourseRatingMen,
+		&i.Front9SlopeRatingMen,
+		&i.Back9CourseRatingMen,
+		&i.Back9SlopeRatingMen,
+		&i.Front9CourseRatingWomen,
+		&i.Front9SlopeRatingWomen,
+		&i.Back9CourseRatingWomen,
+		&i.Back9SlopeRatingWomen,
 	)
 	return i, err
 }
 
 const listTeesByCourse = `-- name: ListTeesByCourse :many
-SELECT id, course_id, name, color, course_rating, slope_rating, total_yardage, display_order FROM tees WHERE course_id = ? ORDER BY display_order ASC, name COLLATE NOCASE ASC
+SELECT id, course_id, name, color, course_rating_men, slope_rating_men, total_yardage, display_order, course_rating_women, slope_rating_women, front9_course_rating_men, front9_slope_rating_men, back9_course_rating_men, back9_slope_rating_men, front9_course_rating_women, front9_slope_rating_women, back9_course_rating_women, back9_slope_rating_women FROM tees WHERE course_id = ? ORDER BY display_order ASC, name COLLATE NOCASE ASC
 `
 
 func (q *Queries) ListTeesByCourse(ctx context.Context, courseID string) ([]Tee, error) {
@@ -86,10 +122,20 @@ func (q *Queries) ListTeesByCourse(ctx context.Context, courseID string) ([]Tee,
 			&i.CourseID,
 			&i.Name,
 			&i.Color,
-			&i.CourseRating,
-			&i.SlopeRating,
+			&i.CourseRatingMen,
+			&i.SlopeRatingMen,
 			&i.TotalYardage,
 			&i.DisplayOrder,
+			&i.CourseRatingWomen,
+			&i.SlopeRatingWomen,
+			&i.Front9CourseRatingMen,
+			&i.Front9SlopeRatingMen,
+			&i.Back9CourseRatingMen,
+			&i.Back9SlopeRatingMen,
+			&i.Front9CourseRatingWomen,
+			&i.Front9SlopeRatingWomen,
+			&i.Back9CourseRatingWomen,
+			&i.Back9SlopeRatingWomen,
 		); err != nil {
 			return nil, err
 		}
@@ -117,26 +163,50 @@ func (q *Queries) MaxTeeDisplayOrder(ctx context.Context, courseID string) (int6
 
 const updateTee = `-- name: UpdateTee :exec
 UPDATE tees
-SET name = ?, color = ?, course_rating = ?, slope_rating = ?, total_yardage = ?, display_order = ?
+SET name = ?, color = ?,
+    course_rating_men = ?, slope_rating_men = ?, course_rating_women = ?, slope_rating_women = ?,
+    front9_course_rating_men = ?, front9_slope_rating_men = ?, back9_course_rating_men = ?, back9_slope_rating_men = ?,
+    front9_course_rating_women = ?, front9_slope_rating_women = ?, back9_course_rating_women = ?, back9_slope_rating_women = ?,
+    total_yardage = ?, display_order = ?
 WHERE id = ?
 `
 
 type UpdateTeeParams struct {
-	Name         string
-	Color        string
-	CourseRating *float64
-	SlopeRating  *int64
-	TotalYardage *int64
-	DisplayOrder int64
-	ID           string
+	Name                    string
+	Color                   string
+	CourseRatingMen         *float64
+	SlopeRatingMen          *int64
+	CourseRatingWomen       *float64
+	SlopeRatingWomen        *int64
+	Front9CourseRatingMen   *float64
+	Front9SlopeRatingMen    *int64
+	Back9CourseRatingMen    *float64
+	Back9SlopeRatingMen     *int64
+	Front9CourseRatingWomen *float64
+	Front9SlopeRatingWomen  *int64
+	Back9CourseRatingWomen  *float64
+	Back9SlopeRatingWomen   *int64
+	TotalYardage            *int64
+	DisplayOrder            int64
+	ID                      string
 }
 
 func (q *Queries) UpdateTee(ctx context.Context, arg UpdateTeeParams) error {
 	_, err := q.db.ExecContext(ctx, updateTee,
 		arg.Name,
 		arg.Color,
-		arg.CourseRating,
-		arg.SlopeRating,
+		arg.CourseRatingMen,
+		arg.SlopeRatingMen,
+		arg.CourseRatingWomen,
+		arg.SlopeRatingWomen,
+		arg.Front9CourseRatingMen,
+		arg.Front9SlopeRatingMen,
+		arg.Back9CourseRatingMen,
+		arg.Back9SlopeRatingMen,
+		arg.Front9CourseRatingWomen,
+		arg.Front9SlopeRatingWomen,
+		arg.Back9CourseRatingWomen,
+		arg.Back9SlopeRatingWomen,
 		arg.TotalYardage,
 		arg.DisplayOrder,
 		arg.ID,

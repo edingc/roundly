@@ -1,6 +1,12 @@
 -- name: CreateTee :exec
-INSERT INTO tees (id, course_id, name, color, course_rating, slope_rating, total_yardage, display_order)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+INSERT INTO tees (
+    id, course_id, name, color,
+    course_rating_men, slope_rating_men, course_rating_women, slope_rating_women,
+    front9_course_rating_men, front9_slope_rating_men, back9_course_rating_men, back9_slope_rating_men,
+    front9_course_rating_women, front9_slope_rating_women, back9_course_rating_women, back9_slope_rating_women,
+    total_yardage, display_order
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetTee :one
 SELECT * FROM tees WHERE id = ?;
@@ -10,7 +16,11 @@ SELECT * FROM tees WHERE course_id = ? ORDER BY display_order ASC, name COLLATE 
 
 -- name: UpdateTee :exec
 UPDATE tees
-SET name = ?, color = ?, course_rating = ?, slope_rating = ?, total_yardage = ?, display_order = ?
+SET name = ?, color = ?,
+    course_rating_men = ?, slope_rating_men = ?, course_rating_women = ?, slope_rating_women = ?,
+    front9_course_rating_men = ?, front9_slope_rating_men = ?, back9_course_rating_men = ?, back9_slope_rating_men = ?,
+    front9_course_rating_women = ?, front9_slope_rating_women = ?, back9_course_rating_women = ?, back9_slope_rating_women = ?,
+    total_yardage = ?, display_order = ?
 WHERE id = ?;
 
 -- name: DeleteTee :exec
