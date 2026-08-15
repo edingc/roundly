@@ -158,6 +158,36 @@ Delivered as `internal/club` plus the `/bag` screen. The API table is in
   but "4 Iron" should not be made to fill in a loft to save it, and the bag list
   drops the detail line entirely for a club that has no detail.
 
+### The printable yardage chart
+
+The point of recording a carry is having it to hand on the course, which a phone
+in a pocket is not always good for. `/bag/chart` prints the bag as a sheet.
+
+- **A print view, not a generated PDF.** The browser's print dialog already
+  offers "Save as PDF", so HTML plus a `@media print` block delivers both paper
+  and a file with no PDF library in the binary and no server endpoint. It also
+  reflows to whatever paper the player has, which a hand-laid-out PDF would not.
+- **The sheet is drawn in paper colours on screen,** so the preview *is* the
+  artifact and the print rules only have to hide the app chrome. This also
+  sidesteps the dark-mode trap: browsers print text colour but drop background
+  colours unless the user ticks "background graphics", so a themed page would
+  print white text onto white paper.
+- **Ruled, not shaded,** for the same reason — borders always print, fills do
+  not.
+- **Sorted by carry, longest first, not in bag order.** A chart is read by
+  distance, so the column has to decrease monotonically. It also stops the sheet
+  from hiding a 5 wood that genuinely outcarries the 3 wood above it.
+- **Gaps are computed from the printed numbers,** not the stored yards, so a
+  reader who subtracts two rows gets the number beside them. Same trap as
+  converting a tee total instead of summing converted holes.
+- **A club with no carry prints a dotted write-in line** rather than being
+  dropped, which turns a chart of an unmeasured bag into a range worksheet.
+- **Columns appear only when some club has the data,** so a bag holding nothing
+  but labels prints two clean columns instead of three empty ones.
+- **Two formats.** A full sheet, and a 3.5in cut-out card that fits a yardage
+  book — a letter page is the wrong shape for something read standing in a
+  fairway.
+
 ### Distance units
 
 Adding carry and dispersion raised the question of metres, which turned out to

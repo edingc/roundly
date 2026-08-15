@@ -205,6 +205,23 @@ than a silent null. The bag screen also hides loft and shaft flex on a putter �
 those are real specs, just not ones worth collecting, so that half of the rule
 is presentation only and the API keeps accepting them.
 
+**The yardage chart is a print view, not a generated file.** `/bag/chart` lays
+the bag out as a sheet the player can print or, from the same dialog, save as a
+PDF. There is no PDF library and no server endpoint behind it — the browser
+already has both a layout engine and a PDF writer, so the chart is HTML with a
+`@media print` block in `web/src/index.css`. The sheet is drawn in paper colours
+on screen, which makes the preview the artifact and keeps the print rules down to
+hiding the app chrome. It is ruled rather than shaded on purpose: browsers omit
+background colours from printing unless the user opts in, but they always print
+borders and text.
+
+Clubs sort by carry, longest first, rather than in bag order — a chart is read by
+distance, so the column has to decrease monotonically for the lookup to work. The
+**Gap** column is computed from the printed numbers rather than the stored yards,
+so subtracting two rows gives exactly the gap beside them. A club with no carry
+prints as a dotted write-in line instead of being dropped, which makes an empty
+bag's chart a useful range worksheet. Putters never appear.
+
 **Distances are stored in yards and displayed in the user's unit.** Every
 distance in the database — hole yardages, tee totals, club carry and dispersion
 — is yards. `users.distance_unit` (`yards` or `meters`, set under Settings →

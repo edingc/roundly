@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
 import { useDistanceUnit } from '../lib/auth'
+import { bagOrder, hasFullSpecs } from '../lib/bag'
 import { formatDistance, type DistanceUnit } from '../lib/units'
 import type { Bag, Club, ClubOptions, ClubPayload, ClubStatus } from '../types'
 import {
@@ -11,6 +13,7 @@ import {
   EmptyState,
   PageSpinner,
   PlusIcon,
+  PrinterIcon,
   WarningIcon,
   cx,
 } from '../components/ui'
@@ -20,41 +23,11 @@ import {
   clubTypeLabel,
   emptyClubForm,
   flexLabel,
-  hasFullSpecs,
   type ClubFormValues,
 } from '../components/ClubForm'
 
 /** Which dialog is open, and what it is editing. */
 type Editing = { mode: 'add' } | { mode: 'edit'; club: Club } | null
-
-/**
- * Orders a group the way a bag is actually laid out: by club type longest
- * first, then by loft ascending within a type, so a 3 wood precedes a 5 wood
- * and a 52° wedge precedes a 60°.
- *
- * This is derived rather than hand-arranged. `display_order` is the stored
- * fallback for clubs with no loft, and is what a future drag-to-reorder would
- * write to.
- */
-function bagOrder(clubs: Club[], clubTypes: string[]): Club[] {
-  const rankOf = (type: string) => {
-    const index = clubTypes.indexOf(type)
-    // An unknown type sorts last rather than tying with the driver.
-    return index === -1 ? clubTypes.length : index
-  }
-
-  return [...clubs].sort((a, b) => {
-    const byType = rankOf(a.club_type) - rankOf(b.club_type)
-    if (byType !== 0) return byType
-
-    // Clubs without a loft fall to the end of their type group.
-    const loftA = a.loft ?? Number.POSITIVE_INFINITY
-    const loftB = b.loft ?? Number.POSITIVE_INFINITY
-    if (loftA !== loftB) return loftA - loftB
-
-    return a.display_order - b.display_order
-  })
-}
 
 /**
  * The secondary meta line under a club's name: brand, model, shaft, flex, and
@@ -300,15 +273,26 @@ export default function GolfBagPage() {
               : 'Loading'}
           </p>
         </div>
-        <button
-          type="button"
-          className="btn-primary ml-auto"
-          onClick={() => setEditing({ mode: 'add' })}
-          disabled={loading || !options}
-        >
-          <PlusIcon className="size-4" />
-          Add club
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          {/* Hidden until there is something to chart — a yardage chart of an
+              empty bag is a blank sheet of paper. */}
+          {totalClubs > 0 && (
+            <Link to="/bag/chart" className="btn-secondary">
+              <PrinterIcon className="size-4" />
+              <span className="hidden sm:inline">Yardage chart</span>
+              <span className="sm:hidden">Chart</span>
+            </Link>
+          )}
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => setEditing({ mode: 'add' })}
+            disabled={loading || !options}
+          >
+            <PlusIcon className="size-4" />
+            Add club
+          </button>
+        </div>
       </div>
 
       {error && <Alert>{error}</Alert>}

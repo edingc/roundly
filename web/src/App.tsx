@@ -10,6 +10,7 @@ import CourseListPage from './pages/CourseListPage'
 import CourseDetailPage from './pages/CourseDetailPage'
 import AddCoursePage from './pages/AddCoursePage'
 import GolfBagPage from './pages/GolfBagPage'
+import YardageChartPage from './pages/YardageChartPage'
 import SettingsPage from './pages/SettingsPage'
 
 /** Sends unauthenticated visitors to the login screen, remembering where they were. */
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="/courses/new" element={<AddCoursePage />} />
         <Route path="/courses/:courseId" element={<CourseDetailPage />} />
         <Route path="/bag" element={<GolfBagPage />} />
+        <Route path="/bag/chart" element={<YardageChartPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
 

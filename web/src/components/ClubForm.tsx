@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Club, ClubPayload } from '../types'
 import { useDistanceUnit } from '../lib/auth'
+import { hasFullSpecs } from '../lib/bag'
 import {
   boundFromYards,
   fromYards,
@@ -38,23 +39,6 @@ const FLEX_LABELS: Record<string, string> = {
   stiff: 'Stiff (S)',
   'x-stiff': 'Extra Stiff (X)',
   wedge: 'Wedge (W)',
-}
-
-/**
- * Whether a club type gets the full spec set: loft, flex, expected carry, and
- * average dispersion. Only a putter does not.
- *
- * Two different reasons are bundled here, and they differ in how hard the rule
- * is. Carry and dispersion describe a full shot, which a putter never hits, so
- * the *server* rejects them on one. Loft and flex are real on a putter — 3.5°
- * is a genuine spec — but not worth the form space, so they are merely hidden
- * here and stay perfectly valid over the API.
- *
- * Kept as one helper so the form and the payload cannot disagree about which
- * fields a putter shows.
- */
-export function hasFullSpecs(clubType: string): boolean {
-  return clubType !== 'putter'
 }
 
 /** Falls back to title-casing so an unknown value from the server still reads well. */

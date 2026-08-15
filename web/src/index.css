@@ -106,3 +106,66 @@
   @apply btn bg-red-600 text-white hover:bg-red-700 active:bg-red-800;
   @apply dark:bg-red-600 dark:hover:bg-red-500;
 }
+
+/* Printing.
+ *
+ * Only the yardage chart is meant to reach paper. Its sheet is already drawn in
+ * paper colours on screen, so this is mostly about getting the app out of the
+ * way — `no-print` marks the chrome and the controls that exist only to set the
+ * chart up.
+ *
+ * The colour overrides are not redundant with that. Browsers print text colour
+ * but omit background colours unless the user ticks "background graphics", so a
+ * page carrying the dark theme would print white text onto white paper. Forcing
+ * black on white is the only way to be sure the sheet comes out legible. For
+ * the same reason the chart itself is ruled with borders rather than filled
+ * rows: rules print by default, fills do not. */
+@media print {
+  @page {
+    margin: 0.5in;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+
+  /* The layout's centred, padded column is screen furniture; on paper the
+     margin is the page margin. */
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .print-sheet {
+    width: 100% !important;
+    max-width: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+
+  .print-sheet * {
+    background: transparent !important;
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+
+  /* On screen the chart scrolls sideways inside the sheet when the viewport is
+     narrower than the table. Paper has no scrollbar to drag, so the clipping
+     has to come off or the right-hand columns would simply be missing. */
+  .chart-scroll {
+    overflow: visible !important;
+  }
+
+  /* A club's line should not be split across two pages. */
+  tr,
+  .print-row {
+    break-inside: avoid;
+  }
+}

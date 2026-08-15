@@ -115,6 +115,41 @@ binary:
 - [ ] Clicking that unit puts the caret in the input rather than doing nothing.
 - [ ] Type the largest allowed carry. The digits do not run under the unit.
 
+### The yardage chart
+
+Reachable from **Yardage chart** on the bag screen, at `/bag/chart`.
+
+- [ ] The button is absent when the bag is empty and appears once a club exists.
+- [ ] The sheet lists every club in the bag except the putter, longest carry
+      first, with the date and your name in the header.
+- [ ] Subtract any two carries in the Carry column. The difference matches the
+      **Gap** printed on the upper row of the pair.
+- [ ] A club with no expected carry sits at the bottom with a dotted line in
+      place of a number, and a note above the sheet says so.
+- [ ] Give a club a carry that outranks the club above it in the bag. It moves up
+      the chart, and the gaps stay positive.
+- [ ] Tick **Include clubs not in the bag**. Benched clubs appear in carry order
+      and the gaps recompute around them. Retired clubs never appear.
+- [ ] A bag holding only a putter says there is nothing to chart, in a neutral
+      tone rather than red, and the Print button is disabled.
+- [ ] A bag where no club has a carry prints every line blank, and the Loft, Gap,
+      and Spread columns disappear rather than printing empty.
+- [ ] With those columns gone, the key under the table stops explaining them.
+- [ ] Switch to **Pocket card**. The card is 3.5in wide with a dashed cut border
+      and lists club and carry only.
+
+Then print (or open the print preview) in **both** light and dark mode:
+
+- [ ] The header, nav, format controls, and the "cut along the dashed line" hint
+      are all absent from the page.
+- [ ] The sheet is black on white in both themes. *(This is the one that catches
+      a themed page printing white text onto white paper.)*
+- [ ] Print with "background graphics" **off** — the default. Every rule and
+      number is still there.
+- [ ] The pocket card keeps its dashed border.
+- [ ] Switch to Meters first. The carries, spreads, and gaps convert; loft stays
+      in degrees, and the header reads "distances in metres".
+
 ### Privacy
 
 - [ ] In a second browser profile, sign up as a different user. Their bag is
@@ -128,4 +163,6 @@ binary:
       buttons wrap rather than overflow, and they are comfortable to tap.
 - [ ] Check the bag list, the add dialog, and the delete confirmation in both
       light and dark at mobile and desktop widths.
+- [ ] At 390px, the yardage chart's table scrolls sideways *inside* the sheet.
+      The page itself must not scroll sideways.
 - [ ] The **Bag** nav item highlights when you are on `/bag`.
