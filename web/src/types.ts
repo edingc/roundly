@@ -112,6 +112,68 @@ export interface AuthConfig {
   google_enabled: boolean
 }
 
+/**
+ * Where a club sits in the bag. Derived server-side from the stored flags, so
+ * "retired but somehow still active" is not representable.
+ */
+export type ClubStatus = 'active' | 'benched' | 'retired'
+
+export interface Club {
+  id: string
+  user_id: string
+  club_type: string
+  label: string
+  brand: string | null
+  model: string | null
+  /** Degrees, fractional because wedges are sold in half degrees. */
+  loft: number | null
+  shaft: string | null
+  flex: string | null
+  notes: string | null
+  status: ClubStatus
+  retired_at: string | null
+  display_order: number
+  created_at: string
+  updated_at: string
+}
+
+/** The whole equipment screen in one response. */
+export interface Bag {
+  active: Club[]
+  benched: Club[]
+  retired: Club[]
+  active_count: number
+  club_limit: number
+  /** A warning the UI surfaces; the server still accepted the state. */
+  over_limit: boolean
+}
+
+/**
+ * The club types and flexes the server will accept, fetched rather than
+ * duplicated here so the two cannot drift apart. `club_types` arrives in bag
+ * order, longest club first.
+ */
+export interface ClubOptions {
+  club_types: string[]
+  flexes: string[]
+  club_limit: number
+}
+
+/** Payload for creating or editing a club. */
+export interface ClubPayload {
+  club_type: string
+  label: string
+  brand?: string | null
+  model?: string | null
+  loft?: number | null
+  shaft?: string | null
+  flex?: string | null
+  notes?: string | null
+  display_order?: number
+  /** Honored on create only; status changes go through setClubStatus. */
+  status?: ClubStatus
+}
+
 /** Payload for creating or editing a tee. */
 export interface TeePayload {
   name: string

@@ -9,20 +9,24 @@ import (
 )
 
 type Querier interface {
+	CountActiveClubs(ctx context.Context, userID string) (int64, error)
 	CountCourses(ctx context.Context) (int64, error)
 	CountSearchCourses(ctx context.Context, query string) (int64, error)
+	CreateClub(ctx context.Context, arg CreateClubParams) error
 	CreateCourse(ctx context.Context, arg CreateCourseParams) error
 	CreateHole(ctx context.Context, arg CreateHoleParams) error
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) error
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
 	CreateTee(ctx context.Context, arg CreateTeeParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	DeleteClub(ctx context.Context, id string) error
 	DeleteCourse(ctx context.Context, id string) error
 	DeleteExpiredRefreshTokens(ctx context.Context, expiresAt string) error
 	DeleteHole(ctx context.Context, id string) error
 	DeleteHoleTeeDetail(ctx context.Context, arg DeleteHoleTeeDetailParams) error
 	DeleteOAuthAccount(ctx context.Context, arg DeleteOAuthAccountParams) error
 	DeleteTee(ctx context.Context, id string) error
+	GetClub(ctx context.Context, id string) (Club, error)
 	GetCourse(ctx context.Context, id string) (Course, error)
 	GetHole(ctx context.Context, id string) (Hole, error)
 	GetHoleByNumber(ctx context.Context, arg GetHoleByNumberParams) (Hole, error)
@@ -33,12 +37,14 @@ type Querier interface {
 	GetTeeByName(ctx context.Context, arg GetTeeByNameParams) (Tee, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
+	ListClubsByUser(ctx context.Context, userID string) ([]Club, error)
 	ListCourses(ctx context.Context, arg ListCoursesParams) ([]Course, error)
 	ListHoleTeeDetailsByCourse(ctx context.Context, courseID string) ([]HoleTeeDetail, error)
 	ListHoleTeeDetailsByHole(ctx context.Context, holeID string) ([]HoleTeeDetail, error)
 	ListHolesByCourse(ctx context.Context, courseID string) ([]Hole, error)
 	ListOAuthAccountsByUser(ctx context.Context, userID string) ([]OauthAccount, error)
 	ListTeesByCourse(ctx context.Context, courseID string) ([]Tee, error)
+	MaxClubDisplayOrder(ctx context.Context, userID string) (int64, error)
 	MaxTeeDisplayOrder(ctx context.Context, courseID string) (int64, error)
 	RevokeAllUserRefreshTokens(ctx context.Context, arg RevokeAllUserRefreshTokensParams) error
 	RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) error
@@ -47,10 +53,12 @@ type Querier interface {
 	// support the ESCAPE clause that literal LIKE matching would require.
 	// lower() gives ASCII-case-insensitive matching; callers pass a lowered term.
 	SearchCourses(ctx context.Context, arg SearchCoursesParams) ([]Course, error)
+	SetClubStatus(ctx context.Context, arg SetClubStatusParams) error
 	SetUserEmailVerified(ctx context.Context, arg SetUserEmailVerifiedParams) error
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error
 	SumTeeYardage(ctx context.Context, teeID string) (int64, error)
 	TouchCourse(ctx context.Context, arg TouchCourseParams) error
+	UpdateClub(ctx context.Context, arg UpdateClubParams) error
 	UpdateCourse(ctx context.Context, arg UpdateCourseParams) error
 	UpdateHole(ctx context.Context, arg UpdateHoleParams) error
 	UpdateTee(ctx context.Context, arg UpdateTeeParams) error

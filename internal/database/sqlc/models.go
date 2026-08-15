@@ -4,6 +4,24 @@
 
 package sqlc
 
+type Club struct {
+	ID           string
+	UserID       string
+	ClubType     string
+	Label        string
+	Brand        *string
+	Model        *string
+	Loft         *float64
+	Shaft        *string
+	Flex         *string
+	Notes        *string
+	Active       int64
+	RetiredAt    *string
+	DisplayOrder int64
+	CreatedAt    string
+	UpdatedAt    string
+}
+
 type Course struct {
 	ID           string
 	Name         string

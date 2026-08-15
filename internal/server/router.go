@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/edingc/roundly/internal/auth"
+	"github.com/edingc/roundly/internal/club"
 	"github.com/edingc/roundly/internal/config"
 	"github.com/edingc/roundly/internal/course"
 	"github.com/edingc/roundly/internal/database"
@@ -25,6 +26,7 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler) http.Handle
 	authService := auth.NewService(db, tokenIssuer, googleProvider)
 	authHandler := auth.NewHandler(authService, googleProvider, cfg.PublicURL, cfg.IsProd())
 	courseHandler := course.NewHandler(course.NewService(db))
+	clubHandler := club.NewHandler(club.NewService(db))
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -37,10 +39,12 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler) http.Handle
 		api.Get("/health", health)
 		api.Mount("/auth", authHandler.Routes())
 
-		// The course directory is entirely behind authentication.
+		// The course directory and the golf bag are entirely behind
+		// authentication.
 		api.Group(func(protected chi.Router) {
 			protected.Use(authService.Middleware)
 			courseHandler.Register(protected)
+			clubHandler.Register(protected)
 		})
 
 		// Any unmatched /api path is a client error, not a request for the SPA.

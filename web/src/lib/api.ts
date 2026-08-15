@@ -1,5 +1,10 @@
 import type {
   AuthConfig,
+  Bag,
+  Club,
+  ClubOptions,
+  ClubPayload,
+  ClubStatus,
   CourseDetail,
   CourseExport,
   CoursePage,
@@ -317,6 +322,31 @@ export const api = {
 
   clearTeeDetail: (holeId: string, teeId: string) =>
     request<void>(`/holes/${holeId}/tee-details/${teeId}`, { method: 'DELETE' }),
+
+  /** The golf bag: active, benched, and retired clubs plus the club-count rule. */
+  getBag: () => request<Bag>('/clubs'),
+
+  /** The club types and flexes the server accepts, for building the form's selects. */
+  clubOptions: () => request<ClubOptions>('/clubs/options'),
+
+  createClub: (payload: ClubPayload) => request<Club>('/clubs', { method: 'POST', body: payload }),
+
+  updateClub: (clubId: string, payload: ClubPayload) =>
+    request<Club>(`/clubs/${clubId}`, { method: 'PUT', body: payload }),
+
+  /**
+   * Moves a club between the bag, the bench, and retirement. Separate from
+   * updateClub so that saving an edit form can never silently change where a
+   * club sits.
+   */
+  setClubStatus: (clubId: string, status: ClubStatus) =>
+    request<Club>(`/clubs/${clubId}/status`, { method: 'PUT', body: { status } }),
+
+  /**
+   * Permanently removes a club. Retiring is the right move for a club that has
+   * been played, since rounds and shots reference club IDs.
+   */
+  deleteClub: (clubId: string) => request<void>(`/clubs/${clubId}`, { method: 'DELETE' }),
 
   /**
    * Begins linking Google to the signed-in account.

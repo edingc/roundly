@@ -3,7 +3,7 @@
 Self-hosted golf scorekeeping and stat tracking. A single Go binary with the
 React frontend embedded, plus one SQLite file.
 
-**Phase 1 (auth + course directory) is complete.** See
+**Phases 1 (auth + course directory) and 2 (golf bag) are complete.** See
 [docs/BUILD_SPEC.md](docs/BUILD_SPEC.md) for the full roadmap.
 
 ## Quick start
@@ -155,13 +155,25 @@ All routes are under `/api`. Everything except the auth endpoints below requires
 | `PUT` | `/holes/{id}/tee-details/{tee_id}` | Upsert par and yardage for one hole+tee |
 | `DELETE` | `/holes/{id}/tee-details/{tee_id}` | Clear that pairing |
 
+**Golf bag** *(all require auth; a bag is private to its owner)*
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/clubs` | The whole bag: active, benched, and retired, plus the club count |
+| `POST` | `/clubs` | Add a club |
+| `GET` | `/clubs/options` | Accepted club types and shaft flexes |
+| `GET` | `/clubs/{id}` | One club |
+| `PUT` | `/clubs/{id}` | Edit description; does not change status |
+| `PUT` | `/clubs/{id}/status` | `{status}` — `active`, `benched`, or `retired` |
+| `DELETE` | `/clubs/{id}` | Delete permanently (prefer retiring) |
+
 Errors share one envelope. `fields` appears only on validation failures:
 
 ```json
 { "error": "validation_failed", "message": "…", "fields": { "par": "Must be between 3 and 6." } }
 ```
 
-### Two notes on the design
+### Three notes on the design
 
 **The OAuth handoff code.** A browser redirect cannot receive a JSON body, and
 putting a refresh token in a redirect URL leaks it into history, logs, and the
@@ -174,6 +186,15 @@ course, but only its creator can modify it. Responses carry `can_edit` so the UI
 does not have to re-derive the rule. This becomes a real permission model in
 Phase 8.
 
+**Club status is derived, not stored twice.** A club is `active` (in the bag),
+`benched` (owned, out of the bag), or `retired` (sold or replaced). Those come
+from an `active` flag and a nullable `retired_at`, with a `CHECK` that a retired
+club cannot also be active, so the contradictory state is unrepresentable rather
+than merely avoided. Retiring is a soft delete: the row and its ID survive, which
+is what lets Phase 3 rounds and Phase 4 shots keep pointing at the club that hit
+them. Status changes go through their own endpoint, so saving an edit form can
+never move a club between groups by accident.
+
 ## Testing
 
 ```bash
@@ -183,7 +204,9 @@ make check    # gofmt, go vet, go test, and a frontend type-check
 Go tests cover password hashing, token issue and verification (including
 rejecting `alg: none` and foreign-key tokens), refresh rotation with replay
 detection, all three Google account-resolution paths, the per-tee par case,
-ownership enforcement, and cascade deletes.
+ownership enforcement, and cascade deletes. The bag adds the full status state
+machine, ID stability across every transition and edit, the 14-club count, and
+the privacy rule that another user's club reads as absent rather than forbidden.
 
 See [docs/phase-1-test-checklist.md](docs/phase-1-test-checklist.md) for the
 manual pass.

@@ -54,6 +54,9 @@ export function AppLayout() {
             <NavLink to="/courses" className={navLinkClass}>
               Courses
             </NavLink>
+            <NavLink to="/bag" className={navLinkClass}>
+              Bag
+            </NavLink>
             <NavLink to="/settings" className={navLinkClass}>
               Settings
             </NavLink>

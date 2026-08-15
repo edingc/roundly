@@ -34,7 +34,7 @@ export function Alert({
   tone = 'error',
   children,
 }: {
-  tone?: 'error' | 'success' | 'info'
+  tone?: 'error' | 'success' | 'info' | 'warning'
   children: ReactNode
 }) {
   const tones = {
@@ -43,6 +43,10 @@ export function Alert({
     success:
       'border-brand-300 bg-brand-50 text-brand-900 dark:border-brand-800 dark:bg-brand-950/60 dark:text-brand-100',
     info: 'border-slate-300 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200',
+    // A rule the player is breaking, not a request that failed — amber rather
+    // than red, and it never blocks the edit.
+    warning:
+      'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-100',
   }
   return (
     <div role={tone === 'error' ? 'alert' : 'status'} className={cx('rounded-lg border px-4 py-3 text-sm', tones[tone])}>
@@ -368,6 +372,32 @@ export function PencilIcon({ className }: { className?: string }) {
         strokeLinejoin="round"
         d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"
       />
+    </svg>
+  )
+}
+
+export function ArchiveIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7h18v3H3zM5 10v9a1 1 0 001 1h12a1 1 0 001-1v-9" />
+      <path strokeLinecap="round" d="M10 14h4" />
+    </svg>
+  )
+}
+
+export function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 9l6 6 6-6" />
+    </svg>
+  )
+}
+
+export function WarningIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4l9 16H3l9-16z" />
+      <path strokeLinecap="round" d="M12 10v4m0 3v.01" />
     </svg>
   )
 }

@@ -37,8 +37,8 @@ the whole thing) to pick up work.
 ## 2. Build Order (Phases)
 
 1. **Phase 1 — Auth + Course Directory** ✅ *complete*
-2. **Phase 2 — Equipment Management** ⬅ *next*
-3. Phase 3 — Score Tracker Core (start/play/complete a round)
+2. **Phase 2 — Equipment Management (Golf Bag)** ✅ *complete*
+3. **Phase 3 — Score Tracker Core** (start/play/complete a round) ⬅ *next*
 4. Phase 4 — Stats Dashboard (aggregates: driving accuracy by club, scoring avg, putts/round, etc.)
 5. Phase 5 — Light/Dark Mode + Responsive Polish Pass
 6. Phase 6 — Self-Hosted Packaging (Docker Compose, single binary)
@@ -93,19 +93,47 @@ These were not specified up front and are worth carrying forward:
 
 ---
 
-## 4. PHASE 2 SPEC — Equipment Management
+## 4. PHASE 2 — Equipment Management (Golf Bag) ✅
 
-Not yet specified. Expected shape, to be confirmed before building:
+Delivered as `internal/club` plus the `/bag` screen. The API table is in
+[../README.md](../README.md); the manual pass is in
+[phase-2-test-checklist.md](phase-2-test-checklist.md).
 
-- Clubs a player carries: type (driver / wood / hybrid / iron / wedge / putter),
-  loft, shaft, and a display label.
-- Bag or set grouping, since players swap clubs between rounds.
-- Per-club typical distance, which Phase 4 will compare against actual shots.
-- Retiring a club without deleting it, so historical round data stays intact.
+### Decisions made during implementation
 
-The Phase 4 stats goal ("driving accuracy by club") is the constraint that
-matters here: rounds will reference a club, so clubs need stable IDs and
-soft retirement rather than hard deletes.
+- **One bag per user, not named sets.** The expected shape floated "bag or set
+  grouping". In practice a player has one bag and swaps clubs in and out of it,
+  so clubs are a flat per-user list with a status, and there is no membership
+  table. Named sets can be added later as a grouping over the same rows without
+  changing what a club *is*.
+- **Three statuses, two columns, one CHECK.** `active` (in the bag), `benched`
+  (owned, out of the bag), `retired` (sold, replaced, broken). Stored as an
+  `active` flag plus a nullable `retired_at`, with
+  `CHECK (retired_at IS NULL OR active = 0)` so a retired-and-active club cannot
+  exist. The API exposes the derived status rather than the two columns.
+- **Retirement is a soft delete; IDs never move.** This is the constraint that
+  drove the whole design: Phase 3 rounds and Phase 4 shots will reference club
+  IDs, so a club that leaves the bag must keep its row. `DELETE /clubs/{id}`
+  still exists for correcting a mistyped club, and the UI steers to Retire.
+  **When rounds start referencing clubs, that endpoint needs to become
+  conditional** — refuse, or cascade to nothing, once a club has shots.
+- **Status changes have their own endpoint.** `PUT /clubs/{id}` edits
+  description only. Otherwise a stale edit form could pull a retired club back
+  into the bag as a side effect of saving a loft.
+- **The 14-club limit is reported, not enforced.** `GET /clubs` returns
+  `active_count`, `club_limit`, and `over_limit`; the UI shows a counter and an
+  amber warning. A bag mid-edit legitimately passes through 15 clubs, and
+  practice bags are larger, so a 409 would fight the user for no safety gain.
+- **A bag is private, unlike the course directory.** Every query is scoped by
+  `user_id`. Another user's club ID returns 404, not 403 — confirming that an ID
+  exists would leak more than the refusal is worth.
+- **No expected-distance field.** The original sketch had one for Phase 4 to
+  compare against. Dropped: Phase 4 derives club distances from recorded shots,
+  and a hand-entered number would be a second, staler source of truth.
+- **Bag order is derived, not arranged.** The list sorts by club type, then loft
+  ascending, which produces the real layout (driver → woods → hybrids → irons →
+  wedges → putter) with no reordering UI. `display_order` is stored and settable,
+  and is what a future drag-to-reorder would write to.
 
 ---
 
@@ -113,7 +141,7 @@ soft retirement rather than hard deletes.
 
 When starting a session:
 
-> "Continuing the golf app — starting Phase 2 (Equipment Management) per
+> "Continuing the golf app — starting Phase 3 (Score Tracker Core) per
 > docs/BUILD_SPEC.md."
 
 The repo now carries its own context: `README.md` covers architecture, the API,
