@@ -13,6 +13,7 @@ import { usePreferences, type StrokeIndexLabel } from '../lib/preferences'
 import { useTheme, type Theme } from '../lib/theme'
 import type { CourseSummary, DistanceUnit } from '../types'
 import { Avatar } from '../components/Avatar'
+import { ApiAccessSection } from '../components/ApiAccessSection'
 import { DataSection } from '../components/DataSection'
 import {
   Alert,
@@ -588,6 +589,9 @@ export default function ProfilePage() {
           </div>
         )}
       </section>
+
+      {/* ---------- 4. API access ---------- */}
+      <ApiAccessSection />
     </div>
   )
 }

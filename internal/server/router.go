@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/edingc/roundly/internal/account"
+	"github.com/edingc/roundly/internal/apikey"
 	"github.com/edingc/roundly/internal/auth"
 	"github.com/edingc/roundly/internal/club"
 	"github.com/edingc/roundly/internal/config"
@@ -20,7 +21,12 @@ import (
 
 // New builds the application handler: the JSON API under /api plus the embedded
 // frontend on every other path.
-func New(cfg *config.Config, db *database.DB, frontend http.Handler) http.Handler {
+//
+// stop shuts down the background goroutines this installs — the API-key
+// last-used flusher and the rate limiter's janitor. Closing it is what keeps
+// them from outliving the server, which matters most in tests, where each case
+// builds its own handler.
+func New(cfg *config.Config, db *database.DB, frontend http.Handler, stop <-chan struct{}) http.Handler {
 	googleProvider := auth.NewGoogleProvider(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL)
 	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
@@ -31,12 +37,31 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler) http.Handle
 	clubHandler := club.NewHandler(club.NewService(db))
 	accountHandler := account.NewHandler(account.NewService(db, authService, courseService))
 
+	apiKeyService := apikey.NewService(db, cfg.APIKeyMaxPerUser)
+	apiKeyHandler := apikey.NewHandler(apiKeyService)
+	requestLimiter := apikey.NewLimiter(cfg.APIKeyRateLimit, cfg.APIKeyRateWindow)
+	// Failed authentications are limited by IP separately and much harder.
+	// Guessing a 256-bit token is hopeless, but each attempt still costs an
+	// indexed query on the only database connection this server has.
+	failureLimiter := apikey.NewLimiter(20, time.Minute)
+
+	// A key's last-used time is written off the request path, coalesced to at
+	// most one update per key per window, so that a read-only request never has
+	// to take the single write connection.
+	apiKeyService.StartFlusher(stop)
+	requestLimiter.StartJanitor(stop)
+	failureLimiter.StartJanitor(stop)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
 	r.Use(corsMiddleware(cfg.CORSOrigins))
+	// Last global middleware, and global rather than per-route on purpose: it
+	// runs before chi routes anything, so no endpoint registered later — in any
+	// group, in any package — can end up outside its reach.
+	r.Use(apikey.Guard(apiKeyService, requestLimiter, failureLimiter))
 
 	r.Route("/api", func(api chi.Router) {
 		api.Get("/health", health)
@@ -54,6 +79,7 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler) http.Handle
 			courseHandler.Register(protected)
 			clubHandler.Register(protected)
 			accountHandler.Register(protected)
+			apiKeyHandler.Register(protected)
 		})
 
 		// Any unmatched /api path is a client error, not a request for the SPA.

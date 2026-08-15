@@ -58,7 +58,12 @@ func run() error {
 		frontendHandler = server.SPAHandler(frontend)
 	}
 
-	handler := server.New(cfg, db, frontendHandler)
+	// Closed on shutdown so the server's background goroutines get a chance to
+	// flush what they are holding rather than being killed mid-window.
+	stopBackground := make(chan struct{})
+	defer close(stopBackground)
+
+	handler := server.New(cfg, db, frontendHandler, stopBackground)
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,

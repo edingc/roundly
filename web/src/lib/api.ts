@@ -1,10 +1,12 @@
 import type {
+  ApiKey,
   AuthConfig,
   Bag,
   Club,
   ClubOptions,
   ClubPayload,
   ClubStatus,
+  CreatedApiKey,
   DistanceUnit,
   CourseDetail,
   CourseExport,
@@ -425,6 +427,19 @@ export const api = {
   importAccount: (payload: unknown) =>
     request<ImportSummary>('/account/import', { method: 'POST', body: payload }),
 
+  // ---- API keys ----
+
+  listApiKeys: () => request<{ keys: ApiKey[] }>('/account/keys'),
+
+  /** The response carries the secret. It is not retrievable afterwards. */
+  createApiKey: (name: string, expiresInDays: number) =>
+    request<CreatedApiKey>('/account/keys', {
+      method: 'POST',
+      body: { name, expires_in_days: expiresInDays },
+    }),
+
+  revokeApiKey: (keyId: string) =>
+    request<void>(`/account/keys/${keyId}`, { method: 'DELETE' }),
 }
 
 /**

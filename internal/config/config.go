@@ -29,6 +29,12 @@ type Config struct {
 	PublicURL string
 
 	CORSOrigins []string
+
+	// Personal API keys. The rate limit is per key rather than per user: a key
+	// is what a script holds, so it is the unit that can run away.
+	APIKeyRateLimit  int
+	APIKeyRateWindow time.Duration
+	APIKeyMaxPerUser int
 }
 
 // GoogleEnabled reports whether this instance has been given Google OAuth
@@ -61,6 +67,24 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	c.RefreshTokenTTL = refreshTTL
+
+	keyWindow, err := envDuration("API_KEY_RATE_WINDOW", time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	c.APIKeyRateWindow = keyWindow
+
+	keyLimit, err := envInt("API_KEY_RATE_LIMIT", 60, 1, 100_000)
+	if err != nil {
+		return nil, err
+	}
+	c.APIKeyRateLimit = keyLimit
+
+	maxKeys, err := envInt("API_KEY_MAX_PER_USER", 10, 1, 100)
+	if err != nil {
+		return nil, err
+	}
+	c.APIKeyMaxPerUser = maxKeys
 
 	secret := env("JWT_SECRET", "")
 	if secret == "" {
@@ -95,6 +119,24 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// envInt reads an integer setting, rejecting values outside [min, max] rather
+// than clamping. A misconfigured limit should fail at boot, where someone is
+// watching, instead of silently running at a bound they did not choose.
+func envInt(key string, def, min, max int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s: invalid integer %q", key, raw)
+	}
+	if n < min || n > max {
+		return 0, fmt.Errorf("%s: must be between %d and %d, got %d", key, min, max, n)
+	}
+	return n, nil
 }
 
 func envDuration(key string, def time.Duration) (time.Duration, error) {

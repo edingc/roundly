@@ -11,8 +11,21 @@ make build && JWT_SECRET=$(openssl rand -hex 32) ./bin/roundly
 
 ## Automated status
 
-Verified by `go test ./...`:
+Verified by `go test ./...`, including `internal/server/router_test.go`, which drives the real
+handler because these guarantees come from middleware *order* and a stubbed router would pass
+while the running server was open:
 
+- [x] Every write verb on every write route is refused for an API key, **and** no row is created
+- [x] `/api/auth/*` is unreachable by a key, including `/api/auth/../auth/me`, `/api//auth/me`,
+      `/api/auth/me/`, and `/api/./auth/me`
+- [x] `/api/account/*` is unreachable, and the response body leaks no account data
+- [x] A key reaches only the allow-listed reads; a GET that exists but is off the list is 403
+- [x] User A's key cannot see user B's clubs (404, matching the bag's existing rule)
+- [x] Revoked, expired, and unknown keys all return an **identical** 401
+- [x] The rate limit trips at the configured count, with `Retry-After` and reset headers
+- [x] A signed-in session is completely unaffected — writes, auth routes, and account routes all
+      still work, with no rate limiting
+- [x] A key-authenticated request resolves to the right user through `auth.MustUserID`
 - [x] Avatar processing: square output, size caps, sniffing over Content-Type, EXIF stripped,
       all eight orientations, transparency flattened, key format validated
 - [x] Import twice creates nothing the second time; `format_version` missing or too new is 400
@@ -72,6 +85,18 @@ Verified by `go test ./...`:
 - [ ] Restore your own JSON file. It reports everything skipped and adds nothing.
 - [ ] Restore it into a second account. Clubs and courses appear; the email does **not** change.
 - [ ] Restore a file with `format_version` set to 99. Refused, with a message about the version.
+
+### API access
+
+- [ ] Create a key. The secret is shown once, with a warning, and copy works.
+- [ ] Reload. The key is listed by prefix only; the full secret is nowhere.
+- [ ] With `curl`, the key reads `/api/me`, `/api/clubs`, and `/api/courses`.
+- [ ] `curl -X POST` with the key on any endpoint returns 403 `api_key_read_only`.
+- [ ] `curl` the key against `/api/account/export` and `/api/auth/me`. Both 403. *(This is the
+      one that matters most — the export is a GET.)*
+- [ ] Exceed the rate limit. 429 with `Retry-After`.
+- [ ] Revoke a key. Confirmation is required; afterwards the key returns 401.
+- [ ] Check the server log. It records the key's prefix and never the secret.
 
 ### Appearance and responsiveness
 

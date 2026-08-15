@@ -223,10 +223,10 @@ either alone. So this is a whole-app preference, added here rather than deferred
 
 ---
 
-## 4b. USER PROFILE — account and data ✅
+## 4b. USER PROFILE — account, data, and API access ✅
 
-Delivered as `internal/account` plus the `/profile` screen, which replaces the old settings
-page. `/settings` redirects so bookmarks survive. The manual pass is
+Delivered as `internal/account` and `internal/apikey` plus the `/profile` screen, which
+replaces the old settings page. `/settings` redirects so bookmarks survive. The manual pass is
 in [profile-test-checklist.md](profile-test-checklist.md).
 
 Not a numbered phase: it is the account surface Phase 3 needs before rounds start attaching
@@ -261,8 +261,25 @@ themselves to people, done early because "download my data" gets much harder to 
   thing someone holding a stolen token would do. Accounts with a password must type it;
   password-less (Google-only) accounts must instead have signed in within the last five minutes,
   because otherwise there would be no second factor at all.
-- **The export excludes credentials and identifiers**: password hash, refresh tokens, the
-  OAuth provider subject, the avatar key, and every row ID. It includes the avatar as base64, so a
+- **API keys enforce read-only in three independent layers,** all in one global middleware that
+  runs before routing: a path allow-list, a GET/HEAD check, and a hard block on `/api/auth/*`
+  and `/api/account/*`. The block is not redundant — `GET /api/account/export` is a GET, so a
+  method check alone would let a "read-only" key exfiltrate the whole account. Global rather
+  than per-route so that a future endpoint registered in the wrong group cannot escape it.
+- **The allow-list is a deny-by-default list, and that is the point.** A route added in Phase 3
+  is invisible to every key until someone deliberately adds it. That will feel like a bug the
+  first time rounds do not appear; it is the design.
+- **SHA-256 for keys, not argon2id.** The token is 256 bits of CSPRNG output, so there is
+  nothing to guess however fast the hash runs, and argon2id on every request would be a
+  self-inflicted denial of service. Domain-separated from the refresh-token hash so the two
+  classes of credential can never be interchanged.
+- **Many keys per user, capped at ten.** A single key makes rotation destructive — the only way
+  to replace it breaks every consumer at once — and `last_used_at` is only actionable if keys
+  are distinguishable.
+- **`last_used_at` is approximate on purpose.** Written by a background flusher, at most once
+  per key per five minutes, so a read-only request never takes the single write connection.
+- **The export excludes credentials and identifiers**: password hash, refresh tokens, API keys,
+  OAuth provider subject, avatar key, and every row ID. It includes the avatar as base64, so a
   restore is complete rather than quietly losing the photo.
 - **CSV is six files, not five.** Par and yardage live in `hole_tee_details`; a set without that
   file loses every number on every scorecard. Cells starting `=`, `+`, `-`, or `@` are escaped,
@@ -280,6 +297,8 @@ themselves to people, done early because "download my data" gets much harder to 
 - **Account deletion is not possible,** and the schema is not ready for it: `courses.created_by`
   has no `ON DELETE CASCADE`, unlike every other reference to `users`. "Download my data" is
   exactly what makes people ask for "delete my account" next.
+- **A key cannot see Phase 3 rounds** until `/api/rounds` is added to the allow-list in
+  `internal/apikey/policy.go`.
 
 ## 5. How to Use This Doc
 

@@ -9,9 +9,11 @@ import (
 )
 
 type Querier interface {
+	CountActiveAPIKeys(ctx context.Context, userID string) (int64, error)
 	CountActiveClubs(ctx context.Context, userID string) (int64, error)
 	CountCourses(ctx context.Context) (int64, error)
 	CountSearchCourses(ctx context.Context, query string) (int64, error)
+	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) error
 	CreateClub(ctx context.Context, arg CreateClubParams) error
 	CreateCourse(ctx context.Context, arg CreateCourseParams) error
 	CreateHole(ctx context.Context, arg CreateHoleParams) error
@@ -27,6 +29,11 @@ type Querier interface {
 	DeleteOAuthAccount(ctx context.Context, arg DeleteOAuthAccountParams) error
 	DeleteTee(ctx context.Context, id string) error
 	DeleteUserAvatar(ctx context.Context, userID string) error
+	// The authentication lookup. Equality on an indexed hash, not on the secret:
+	// there is nothing here to compare in constant time, because the value in the
+	// WHERE clause is already a digest of the attacker's own input.
+	GetAPIKeyByHash(ctx context.Context, keyHash string) (ApiKey, error)
+	GetAPIKeyForUser(ctx context.Context, arg GetAPIKeyForUserParams) (ApiKey, error)
 	// The whole avatar serve path, in one indexed lookup. Joined rather than keyed
 	// directly on the image row so that the unguessable key stays in one place.
 	GetAvatarByKey(ctx context.Context, avatarKey *string) (GetAvatarByKeyRow, error)
@@ -42,6 +49,7 @@ type Querier interface {
 	GetTeeByName(ctx context.Context, arg GetTeeByNameParams) (Tee, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
+	ListAPIKeysByUser(ctx context.Context, userID string) ([]ApiKey, error)
 	ListClubsByUser(ctx context.Context, userID string) ([]Club, error)
 	ListCourses(ctx context.Context, arg ListCoursesParams) ([]Course, error)
 	// Every course this user created, for the account export. Backed by
@@ -62,6 +70,9 @@ type Querier interface {
 	ListTeesByCreator(ctx context.Context, createdBy string) ([]Tee, error)
 	MaxClubDisplayOrder(ctx context.Context, userID string) (int64, error)
 	MaxTeeDisplayOrder(ctx context.Context, courseID string) (int64, error)
+	// The user_id predicate is the ownership check: another user's key id matches
+	// zero rows rather than revoking their key.
+	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	RevokeAllUserRefreshTokens(ctx context.Context, arg RevokeAllUserRefreshTokensParams) error
 	RevokeRefreshToken(ctx context.Context, arg RevokeRefreshTokenParams) error
 	// Search uses instr() rather than LIKE so the term is matched literally: a
@@ -74,6 +85,7 @@ type Querier interface {
 	SetUserEmailVerified(ctx context.Context, arg SetUserEmailVerifiedParams) error
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error
 	SumTeeYardage(ctx context.Context, teeID string) (int64, error)
+	TouchAPIKeyLastUsed(ctx context.Context, arg TouchAPIKeyLastUsedParams) error
 	TouchCourse(ctx context.Context, arg TouchCourseParams) error
 	UpdateClub(ctx context.Context, arg UpdateClubParams) error
 	UpdateCourse(ctx context.Context, arg UpdateCourseParams) error

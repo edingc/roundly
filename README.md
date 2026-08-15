@@ -4,7 +4,7 @@ Self-hosted golf scorekeeping and stat tracking. A single Go binary with the
 React frontend embedded, plus one SQLite file.
 
 **Phases 1 (auth + course directory) and 2 (golf bag) are complete, plus the user
-profile: account details and data export and restore.** See
+profile: account details, data export and restore, and read-only API keys.** See
 [docs/BUILD_SPEC.md](docs/BUILD_SPEC.md) for the full roadmap.
 
 ## Quick start
@@ -87,6 +87,7 @@ on the detail page stay clickable either way.
 cmd/server/          entrypoint: config, database, HTTP server, signal handling
 internal/
   account/           profile, avatars, whole-account export and merge import
+  apikey/            read-only personal API keys: token, policy, limiter, guard
   auth/              both login paths, sessions, argon2id, Google OIDC, middleware
   course/            course/tee/hole CRUD and the per-tee par & yardage mapping
   config/            environment configuration
@@ -142,17 +143,19 @@ All routes are under `/api`. Everything except the auth endpoints below requires
 | `POST` | `/auth/password` | Set or change the password *(auth)* |
 | `PUT` | `/auth/preferences` | `{distance_unit}` — `yards` or `meters` *(auth)* |
 
-**Account** *(all require auth)*
+**Account** *(all require a signed-in session; an API key cannot reach any of these)*
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/me` | The signed-in user |
+| `GET` | `/me` | The signed-in user. The one account route an API key *can* read |
 | `PUT` | `/account/profile` | Names, home course, location |
 | `PUT` | `/account/email` | Change the login address; returns a new session |
 | `POST` `DELETE` | `/account/avatar` | Upload (multipart, field `avatar`) or clear the photo |
 | `GET` | `/avatars/{key}.jpg` | The image itself — unauthenticated, see below |
 | `GET` | `/account/export?format=json\|csv` | Download everything you own |
 | `POST` | `/account/import` | Merge a JSON backup back in |
+| `GET` `POST` | `/account/keys` | List keys, or create one (the only response with a secret) |
+| `DELETE` | `/account/keys/{id}` | Revoke a key |
 
 **Courses** *(all require auth)*
 
@@ -244,7 +247,7 @@ Distances) is a display preference applied at the input and display boundary by
 the original numbers. Course export stays in yards so a shared course file does
 not depend on who exported it.
 
-### The profile, avatars, and data export
+### The profile, and read-only API keys
 
 **Avatars are stored in SQLite, in their own table.** A 256×256 JPEG is 15–30 KB, well under
 the size where the filesystem starts to beat SQLite, so keeping it in the database preserves
@@ -267,9 +270,30 @@ correct — the bytes at a URL genuinely never change, and replacing a photo inv
 cache by changing the address. The URL is a bearer capability: anyone holding it can view that
 image until it is replaced, the same trade-off Gravatar makes.
 
+**API keys are read-only, and that is enforced in three independent layers.** All three live in
+one global middleware that runs *before* chi routes anything, so no endpoint added later — in
+any package, in any group — can end up outside it:
+
+1. an explicit allow-list of paths (`/api/health`, `/api/me`, `/api/courses`, `/api/courses/{id}`,
+   `/api/clubs`, `/api/clubs/options`, `/api/clubs/{id}`);
+2. a `GET`/`HEAD` method check;
+3. an outright block on `/api/auth/*` and `/api/account/*`.
+
+The third is not decoration. `GET /api/account/export` is a GET, so a method check alone would
+let a "read-only" key download the user's entire account, and `GET /api/account/keys` would let
+it enumerate their other credentials. Any one layer would usually be enough; the point of
+having three is that no single mistake is.
+
+Only a SHA-256 of the token is stored, domain-separated from the refresh-token hash so the two
+can never be interchanged. A password KDF would be wrong here: the token is 256 bits of CSPRNG
+output, so there is nothing to guess however fast the hash is, and running argon2id on every
+request would be a denial of service the server performs on itself. `last_used_at` is coalesced
+through a background flusher — at most one write per key per five minutes — so a read-only
+request never has to take the single write connection.
+
 **Export and import.** `GET /account/export` returns profile, clubs, and every course you
 created, with the avatar base64-embedded so a restore is actually complete. It excludes the
-password hash, refresh tokens, and the OAuth provider subject. The CSV option is a ZIP
+password hash, refresh tokens, API keys, and the OAuth provider subject. The CSV option is a ZIP
 of six tables — the sixth, `hole_tee_details.csv`, is where par and yardage live, and a set
 without it would silently lose every number on every scorecard. Cells beginning `=`, `+`, `-`,
 or `@` are prefixed with an apostrophe, because a club labelled `=HYPERLINK(…)` is executable

@@ -47,6 +47,26 @@ export interface ProfilePayload {
   location_country?: string | null
 }
 
+/**
+ * An API key's metadata. There is deliberately no token field: the secret is
+ * returned once, by createApiKey, and never again.
+ */
+export interface ApiKey {
+  id: string
+  name: string
+  key_prefix: string
+  scope: string
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
+}
+
+/** The one and only response that carries a key's secret. */
+export interface CreatedApiKey {
+  key: ApiKey
+  token: string
+}
+
 export interface ImportCounts {
   imported: number
   skipped: number
