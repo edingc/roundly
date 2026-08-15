@@ -60,6 +60,11 @@ export default function CourseDetailPage() {
   const [address, setAddress] = useState('')
   const [phone, setPhone] = useState('')
   const [website, setWebsite] = useState('')
+  const [notes, setNotes] = useState('')
+  const [facilityType, setFacilityType] = useState('')
+  const [latitude, setLatitude] = useState('')
+  const [longitude, setLongitude] = useState('')
+  const [pinned, setPinned] = useState(false)
   const [savingDetails, setSavingDetails] = useState(false)
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({})
 
@@ -80,6 +85,11 @@ export default function CourseDetailPage() {
       setAddress(detail.address ?? '')
       setPhone(detail.phone ?? '')
       setWebsite(detail.website ?? '')
+      setNotes(detail.notes ?? '')
+      setFacilityType(detail.facility_type ?? '')
+      setLatitude(detail.latitude != null ? String(detail.latitude) : '')
+      setLongitude(detail.longitude != null ? String(detail.longitude) : '')
+      setPinned(detail.pinned)
       setError(null)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not load this course.')
@@ -103,6 +113,11 @@ export default function CourseDetailPage() {
         address: address.trim() === '' ? null : address,
         phone: phone.trim() === '' ? null : formatPhone(phone),
         website: website.trim() === '' ? null : website,
+        notes: notes.trim() === '' ? null : notes,
+        facility_type: facilityType === '' ? null : facilityType,
+        latitude: latitude.trim() === '' ? null : Number(latitude),
+        longitude: longitude.trim() === '' ? null : Number(longitude),
+        pinned,
       })
       setCourse(updated)
       setEditingDetails(false)
@@ -233,6 +248,67 @@ export default function CourseDetailPage() {
             maxLength={2048}
             placeholder="Optional"
           />
+          <div>
+            <label htmlFor="edit-facility-type" className="label">
+              Facility type
+            </label>
+            <select
+              id="edit-facility-type"
+              value={facilityType}
+              onChange={(e) => setFacilityType(e.target.value)}
+              className="input"
+            >
+              <option value="">—</option>
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+              <option value="military">Military</option>
+              <option value="resort">Resort</option>
+            </select>
+            {detailErrors.facility_type && (
+              <p className="field-error">{detailErrors.facility_type}</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="Latitude"
+              type="number"
+              value={latitude}
+              onChange={(e) => setLatitude(e.target.value)}
+              error={detailErrors.latitude}
+              placeholder="Optional"
+              step="any"
+            />
+            <Field
+              label="Longitude"
+              type="number"
+              value={longitude}
+              onChange={(e) => setLongitude(e.target.value)}
+              error={detailErrors.longitude}
+              placeholder="Optional"
+              step="any"
+            />
+          </div>
+          <div>
+            <label className="label">Notes</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="input"
+              rows={3}
+              maxLength={2000}
+              placeholder="Optional"
+            />
+            {detailErrors.notes && <p className="field-error">{detailErrors.notes}</p>}
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={pinned}
+              onChange={(e) => setPinned(e.target.checked)}
+              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600 dark:bg-slate-800"
+            />
+            Pin this course
+          </label>
           <div className="flex gap-2">
             <button
               type="button"
@@ -243,6 +319,11 @@ export default function CourseDetailPage() {
                 setAddress(course.address ?? '')
                 setPhone(course.phone ?? '')
                 setWebsite(course.website ?? '')
+                setNotes(course.notes ?? '')
+                setFacilityType(course.facility_type ?? '')
+                setLatitude(course.latitude != null ? String(course.latitude) : '')
+                setLongitude(course.longitude != null ? String(course.longitude) : '')
+                setPinned(course.pinned)
                 setDetailErrors({})
               }}
             >
@@ -289,6 +370,23 @@ export default function CourseDetailPage() {
                 >
                   {course.website.replace(/^https?:\/\//, '')}
                 </a>
+              </p>
+            )}
+            {course.facility_type && (
+              <p className="mt-1.5">
+                <span className="inline-block rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800 capitalize dark:bg-brand-900 dark:text-brand-100">
+                  {course.facility_type}
+                </span>
+              </p>
+            )}
+            {course.latitude != null && course.longitude != null && (
+              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
+                {course.latitude.toFixed(6)}, {course.longitude.toFixed(6)}
+              </p>
+            )}
+            {course.notes && (
+              <p className="mt-1.5 text-sm whitespace-pre-line text-slate-600 dark:text-slate-400">
+                {course.notes}
               </p>
             )}
             {!editable && (

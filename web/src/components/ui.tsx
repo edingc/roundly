@@ -359,3 +359,11 @@ export function UploadIcon({ className }: { className?: string }) {
     </svg>
   )
 }
+
+export function PinIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M14.5 2a1 1 0 01.7 1.7l-.5.5.9 4.6 2.6 2.6a1 1 0 01-.7 1.7H13v5a1 1 0 01-2 0v-5H6.5a1 1 0 01-.7-1.7l2.6-2.6.9-4.6-.5-.5A1 1 0 019.5 2z" />
+    </svg>
+  )
+}

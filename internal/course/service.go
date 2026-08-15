@@ -155,10 +155,15 @@ func (s *Service) detail(ctx context.Context, row sqlc.Course, viewerID string) 
 
 // CreateCourseInput is the payload for creating a course.
 type CreateCourseInput struct {
-	Name    string
-	Address *string
-	Phone   *string
-	Website *string
+	Name         string
+	Address      *string
+	Phone        *string
+	Website      *string
+	Notes        *string
+	FacilityType *string
+	Latitude     *float64
+	Longitude    *float64
+	Pinned       bool
 	// HoleCount pre-creates holes 1..HoleCount so the par/yardage grid is
 	// immediately usable. Zero means DefaultHoleCount.
 	HoleCount int
@@ -196,15 +201,24 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 	now := timex.Now()
 
 	err := s.db.InTx(func(q *sqlc.Queries) error {
+		var pinned int64
+		if in.Pinned {
+			pinned = 1
+		}
 		if err := q.CreateCourse(ctx, sqlc.CreateCourseParams{
-			ID:        courseID,
-			Name:      strings.TrimSpace(in.Name),
-			Address:   normalizeOptional(in.Address),
-			Phone:     normalizeOptional(in.Phone),
-			Website:   normalizeOptional(in.Website),
-			CreatedBy: creatorID,
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:           courseID,
+			Name:         strings.TrimSpace(in.Name),
+			Address:      normalizeOptional(in.Address),
+			Phone:        normalizeOptional(in.Phone),
+			Website:      normalizeOptional(in.Website),
+			Notes:        normalizeOptional(in.Notes),
+			FacilityType: normalizeOptional(in.FacilityType),
+			Latitude:     in.Latitude,
+			Longitude:    in.Longitude,
+			Pinned:       pinned,
+			CreatedBy:    creatorID,
+			CreatedAt:    now,
+			UpdatedAt:    now,
 		}); err != nil {
 			return fmt.Errorf("insert course: %w", err)
 		}
@@ -263,13 +277,16 @@ type ImportHoleInput struct {
 // holes from data produced by Export. If ID is set and the importer owns a
 // course with that ID, the existing course is updated in place.
 type ImportCourseInput struct {
-	ID      string
-	Name    string
-	Address *string
-	Phone   *string
-	Website *string
-	Tees    []TeeInput
-	Holes   []ImportHoleInput
+	ID           string
+	Name         string
+	Address      *string
+	Phone        *string
+	Website      *string
+	FacilityType *string
+	Latitude     *float64
+	Longitude    *float64
+	Tees         []TeeInput
+	Holes        []ImportHoleInput
 }
 
 // Import recreates or updates a course, its tees, and its holes (with par
@@ -296,26 +313,38 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 
 	err := s.db.InTx(func(q *sqlc.Queries) error {
 		if update {
+			// Import preserves the existing notes and pinned values.
+			existing, _ := q.GetCourse(ctx, courseID)
 			if err := q.UpdateCourse(ctx, sqlc.UpdateCourseParams{
-				Name:      strings.TrimSpace(in.Name),
-				Address:   normalizeOptional(in.Address),
-				Phone:     normalizeOptional(in.Phone),
-				Website:   normalizeOptional(in.Website),
-				UpdatedAt: now,
-				ID:        courseID,
+				Name:         strings.TrimSpace(in.Name),
+				Address:      normalizeOptional(in.Address),
+				Phone:        normalizeOptional(in.Phone),
+				Website:      normalizeOptional(in.Website),
+				Notes:        existing.Notes,
+				FacilityType: normalizeOptional(in.FacilityType),
+				Latitude:     in.Latitude,
+				Longitude:    in.Longitude,
+				Pinned:       existing.Pinned,
+				UpdatedAt:    now,
+				ID:           courseID,
 			}); err != nil {
 				return fmt.Errorf("update course: %w", err)
 			}
 		} else {
 			if err := q.CreateCourse(ctx, sqlc.CreateCourseParams{
-				ID:        courseID,
-				Name:      strings.TrimSpace(in.Name),
-				Address:   normalizeOptional(in.Address),
-				Phone:     normalizeOptional(in.Phone),
-				Website:   normalizeOptional(in.Website),
-				CreatedBy: creatorID,
-				CreatedAt: now,
-				UpdatedAt: now,
+				ID:           courseID,
+				Name:         strings.TrimSpace(in.Name),
+				Address:      normalizeOptional(in.Address),
+				Phone:        normalizeOptional(in.Phone),
+				Website:      normalizeOptional(in.Website),
+				Notes:        nil,
+				FacilityType: normalizeOptional(in.FacilityType),
+				Latitude:     in.Latitude,
+				Longitude:    in.Longitude,
+				Pinned:       0,
+				CreatedBy:    creatorID,
+				CreatedAt:    now,
+				UpdatedAt:    now,
 			}); err != nil {
 				return fmt.Errorf("insert course: %w", err)
 			}
@@ -474,10 +503,15 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 
 // UpdateCourseInput is the payload for updating course-level fields.
 type UpdateCourseInput struct {
-	Name    string
-	Address *string
-	Phone   *string
-	Website *string
+	Name         string
+	Address      *string
+	Phone        *string
+	Website      *string
+	Notes        *string
+	FacilityType *string
+	Latitude     *float64
+	Longitude    *float64
+	Pinned       bool
 }
 
 func (s *Service) Update(ctx context.Context, editorID, courseID string, in UpdateCourseInput) (*CourseDetail, error) {
@@ -486,13 +520,22 @@ func (s *Service) Update(ctx context.Context, editorID, courseID string, in Upda
 		return nil, err
 	}
 
+	var pinned int64
+	if in.Pinned {
+		pinned = 1
+	}
 	if err := s.db.Queries.UpdateCourse(ctx, sqlc.UpdateCourseParams{
-		Name:      strings.TrimSpace(in.Name),
-		Address:   normalizeOptional(in.Address),
-		Phone:     normalizeOptional(in.Phone),
-		Website:   normalizeOptional(in.Website),
-		UpdatedAt: timex.Now(),
-		ID:        row.ID,
+		Name:         strings.TrimSpace(in.Name),
+		Address:      normalizeOptional(in.Address),
+		Phone:        normalizeOptional(in.Phone),
+		Website:      normalizeOptional(in.Website),
+		Notes:        normalizeOptional(in.Notes),
+		FacilityType: normalizeOptional(in.FacilityType),
+		Latitude:     in.Latitude,
+		Longitude:    in.Longitude,
+		Pinned:       pinned,
+		UpdatedAt:    timex.Now(),
+		ID:           row.ID,
 	}); err != nil {
 		return nil, httpx.Internal(fmt.Errorf("update course: %w", err))
 	}

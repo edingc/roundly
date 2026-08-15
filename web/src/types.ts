@@ -24,6 +24,11 @@ export interface CourseSummary {
   address: string | null
   phone: string | null
   website: string | null
+  notes: string | null
+  facility_type: string | null
+  latitude: number | null
+  longitude: number | null
+  pinned: boolean
   created_by: string
   created_at: string
   updated_at: string
@@ -92,6 +97,9 @@ export interface CourseExport {
   address: string | null
   phone: string | null
   website: string | null
+  facility_type: string | null
+  latitude: number | null
+  longitude: number | null
   tees: TeePayload[]
   holes: Array<{
     hole_number: number

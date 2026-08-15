@@ -126,12 +126,17 @@ type teeRequest struct {
 }
 
 type createCourseRequest struct {
-	Name      string       `json:"name"`
-	Address   *string      `json:"address"`
-	Phone     *string      `json:"phone"`
-	Website   *string      `json:"website"`
-	HoleCount int          `json:"hole_count"`
-	Tees      []teeRequest `json:"tees"`
+	Name         string       `json:"name"`
+	Address      *string      `json:"address"`
+	Phone        *string      `json:"phone"`
+	Website      *string      `json:"website"`
+	Notes        *string      `json:"notes"`
+	FacilityType *string      `json:"facility_type"`
+	Latitude     *float64     `json:"latitude"`
+	Longitude    *float64     `json:"longitude"`
+	Pinned       bool         `json:"pinned"`
+	HoleCount    int          `json:"hole_count"`
+	Tees         []teeRequest `json:"tees"`
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +147,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website)
+	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website, req.Notes, req.FacilityType, req.Latitude, req.Longitude)
 
 	// Nine- and eighteen-hole courses are the realistic cases, and the holes
 	// table CHECK constraint caps hole numbers at 18 either way.
@@ -161,12 +166,17 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	detail, err := h.service.Create(ctx, auth.MustUserID(ctx), CreateCourseInput{
-		Name:      req.Name,
-		Address:   req.Address,
-		Phone:     req.Phone,
-		Website:   req.Website,
-		HoleCount: req.HoleCount,
-		Tees:      tees,
+		Name:         req.Name,
+		Address:      req.Address,
+		Phone:        req.Phone,
+		Website:      req.Website,
+		Notes:        req.Notes,
+		FacilityType: req.FacilityType,
+		Latitude:     req.Latitude,
+		Longitude:    req.Longitude,
+		Pinned:       req.Pinned,
+		HoleCount:    req.HoleCount,
+		Tees:         tees,
 	})
 	if err != nil {
 		httpx.Error(w, r, err)
@@ -176,10 +186,15 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateCourseRequest struct {
-	Name    string  `json:"name"`
-	Address *string `json:"address"`
-	Phone   *string `json:"phone"`
-	Website *string `json:"website"`
+	Name         string   `json:"name"`
+	Address      *string  `json:"address"`
+	Phone        *string  `json:"phone"`
+	Website      *string  `json:"website"`
+	Notes        *string  `json:"notes"`
+	FacilityType *string  `json:"facility_type"`
+	Latitude     *float64 `json:"latitude"`
+	Longitude    *float64 `json:"longitude"`
+	Pinned       bool     `json:"pinned"`
 }
 
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
@@ -190,7 +205,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website)
+	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website, req.Notes, req.FacilityType, req.Latitude, req.Longitude)
 	if err := v.Err(); err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -198,10 +213,15 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	detail, err := h.service.Update(ctx, auth.MustUserID(ctx), chi.URLParam(r, "courseID"), UpdateCourseInput{
-		Name:    req.Name,
-		Address: req.Address,
-		Phone:   req.Phone,
-		Website: req.Website,
+		Name:         req.Name,
+		Address:      req.Address,
+		Phone:        req.Phone,
+		Website:      req.Website,
+		Notes:        req.Notes,
+		FacilityType: req.FacilityType,
+		Latitude:     req.Latitude,
+		Longitude:    req.Longitude,
+		Pinned:       req.Pinned,
 	})
 	if err != nil {
 		httpx.Error(w, r, err)
@@ -391,7 +411,14 @@ func (h *Handler) clearTeeDetail(w http.ResponseWriter, r *http.Request) {
 	httpx.NoContent(w)
 }
 
-func validateCourseFields(v *httpx.Validator, name string, address, phone, website *string) {
+var validFacilityTypes = map[string]bool{
+	"public":   true,
+	"private":  true,
+	"military": true,
+	"resort":   true,
+}
+
+func validateCourseFields(v *httpx.Validator, name string, address, phone, website, notes, facilityType *string, latitude, longitude *float64) {
 	v.Required("name", name)
 	v.MaxLen("name", strings.TrimSpace(name), 120)
 	validateAddress(v, address)
@@ -399,6 +426,20 @@ func validateCourseFields(v *httpx.Validator, name string, address, phone, websi
 		v.MaxLen("phone", strings.TrimSpace(*phone), 30)
 	}
 	validateWebsite(v, website)
+	if notes != nil && strings.TrimSpace(*notes) != "" {
+		v.MaxLen("notes", strings.TrimSpace(*notes), 2000)
+	}
+	if facilityType != nil && strings.TrimSpace(*facilityType) != "" {
+		if !validFacilityTypes[strings.TrimSpace(*facilityType)] {
+			v.Add("facility_type", "Facility type must be public, private, military, or resort.")
+		}
+	}
+	if latitude != nil && (*latitude < -90 || *latitude > 90) {
+		v.Add("latitude", "Latitude must be between -90 and 90.")
+	}
+	if longitude != nil && (*longitude < -180 || *longitude > 180) {
+		v.Add("longitude", "Longitude must be between -180 and 180.")
+	}
 }
 
 // validateWebsite checks that a website, when provided and non-empty, looks

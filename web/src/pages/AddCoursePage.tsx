@@ -37,6 +37,11 @@ export default function AddCoursePage() {
   const [address, setAddress] = useState('')
   const [phone, setPhone] = useState('')
   const [website, setWebsite] = useState('')
+  const [notes, setNotes] = useState('')
+  const [facilityType, setFacilityType] = useState('')
+  const [latitude, setLatitude] = useState('')
+  const [longitude, setLongitude] = useState('')
+  const [pinned, setPinned] = useState(false)
   const [holeCount, setHoleCount] = useState<9 | 18>(18)
   const [tees, setTees] = useState<TeeFormValues[]>([emptyTeeForm()])
 
@@ -72,6 +77,11 @@ export default function AddCoursePage() {
         address: address.trim() === '' ? null : address,
         phone: phone.trim() === '' ? null : formatPhone(phone),
         website: website.trim() === '' ? null : website,
+        notes: notes.trim() === '' ? null : notes,
+        facility_type: facilityType === '' ? null : facilityType,
+        latitude: latitude.trim() === '' ? null : Number(latitude),
+        longitude: longitude.trim() === '' ? null : Number(longitude),
+        pinned,
         hole_count: holeCount,
         tees: tees.filter((tee) => tee.name.trim() !== '').map(teeFormToPayload),
       })
@@ -194,6 +204,67 @@ export default function AddCoursePage() {
             maxLength={2048}
             placeholder="Optional"
           />
+          <div>
+            <label htmlFor="add-facility-type" className="label">
+              Facility type
+            </label>
+            <select
+              id="add-facility-type"
+              value={facilityType}
+              onChange={(e) => setFacilityType(e.target.value)}
+              className="input"
+            >
+              <option value="">—</option>
+              <option value="public">Public</option>
+              <option value="private">Private</option>
+              <option value="military">Military</option>
+              <option value="resort">Resort</option>
+            </select>
+            {errors.facility_type && (
+              <p className="field-error">{errors.facility_type}</p>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              label="Latitude"
+              type="number"
+              value={latitude}
+              onChange={(e) => setLatitude(e.target.value)}
+              error={errors.latitude}
+              placeholder="Optional"
+              step="any"
+            />
+            <Field
+              label="Longitude"
+              type="number"
+              value={longitude}
+              onChange={(e) => setLongitude(e.target.value)}
+              error={errors.longitude}
+              placeholder="Optional"
+              step="any"
+            />
+          </div>
+          <div>
+            <label className="label">Notes</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="input"
+              rows={3}
+              maxLength={2000}
+              placeholder="Optional"
+            />
+            {errors.notes && <p className="field-error">{errors.notes}</p>}
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={pinned}
+              onChange={(e) => setPinned(e.target.checked)}
+              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600 dark:bg-slate-800"
+            />
+            Pin this course
+          </label>
           <fieldset>
             <legend className="label">Holes</legend>
             <div className="flex gap-2">

@@ -4,14 +4,19 @@ import "github.com/edingc/roundly/internal/database/sqlc"
 
 // Course is the list representation: no tees or holes, for the index screen.
 type Course struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	Address   *string `json:"address"`
-	Phone     *string `json:"phone"`
-	Website   *string `json:"website"`
-	CreatedBy string  `json:"created_by"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Address      *string  `json:"address"`
+	Phone        *string  `json:"phone"`
+	Website      *string  `json:"website"`
+	Notes        *string  `json:"notes"`
+	FacilityType *string  `json:"facility_type"`
+	Latitude     *float64 `json:"latitude"`
+	Longitude    *float64 `json:"longitude"`
+	Pinned       bool     `json:"pinned"`
+	CreatedBy    string   `json:"created_by"`
+	CreatedAt    string   `json:"created_at"`
+	UpdatedAt    string   `json:"updated_at"`
 	// CanEdit tells the frontend whether to show edit controls, so it does not
 	// have to duplicate the ownership rule.
 	CanEdit bool `json:"can_edit"`
@@ -85,15 +90,20 @@ type Page struct {
 
 func toCourse(row sqlc.Course, viewerID string) Course {
 	return Course{
-		ID:        row.ID,
-		Name:      row.Name,
-		Address:   row.Address,
-		Phone:     row.Phone,
-		Website:   row.Website,
-		CreatedBy: row.CreatedBy,
-		CreatedAt: row.CreatedAt,
-		UpdatedAt: row.UpdatedAt,
-		CanEdit:   row.CreatedBy == viewerID,
+		ID:           row.ID,
+		Name:         row.Name,
+		Address:      row.Address,
+		Phone:        row.Phone,
+		Website:      row.Website,
+		Notes:        row.Notes,
+		FacilityType: row.FacilityType,
+		Latitude:     row.Latitude,
+		Longitude:    row.Longitude,
+		Pinned:       row.Pinned != 0,
+		CreatedBy:    row.CreatedBy,
+		CreatedAt:    row.CreatedAt,
+		UpdatedAt:    row.UpdatedAt,
+		CanEdit:      row.CreatedBy == viewerID,
 	}
 }
 

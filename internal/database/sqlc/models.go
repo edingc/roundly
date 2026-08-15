@@ -5,14 +5,19 @@
 package sqlc
 
 type Course struct {
-	ID        string
-	Name      string
-	Address   *string
-	CreatedBy string
-	CreatedAt string
-	UpdatedAt string
-	Phone     *string
-	Website   *string
+	ID           string
+	Name         string
+	Address      *string
+	CreatedBy    string
+	CreatedAt    string
+	UpdatedAt    string
+	Phone        *string
+	Website      *string
+	Notes        *string
+	FacilityType *string
+	Latitude     *float64
+	Longitude    *float64
+	Pinned       int64
 }
 
 type Hole struct {

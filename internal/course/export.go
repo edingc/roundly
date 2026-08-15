@@ -13,7 +13,7 @@ import (
 
 // courseExportFormatVersion is bumped whenever the export shape changes in a
 // way that would break importing an older file.
-const courseExportFormatVersion = 2
+const courseExportFormatVersion = 3
 
 // CourseExport is everything needed to recreate a course elsewhere: tees and
 // holes are matched by name and number instead of ID, since IDs are not
@@ -27,6 +27,9 @@ type CourseExport struct {
 	Address       *string      `json:"address"`
 	Phone         *string      `json:"phone"`
 	Website       *string      `json:"website"`
+	FacilityType  *string      `json:"facility_type"`
+	Latitude      *float64     `json:"latitude"`
+	Longitude     *float64     `json:"longitude"`
 	Tees          []teeRequest `json:"tees"`
 	Holes         []holeExport `json:"holes"`
 }
@@ -102,6 +105,9 @@ func (h *Handler) export(w http.ResponseWriter, r *http.Request) {
 		Address:       detail.Address,
 		Phone:         detail.Phone,
 		Website:       detail.Website,
+		FacilityType:  detail.FacilityType,
+		Latitude:      detail.Latitude,
+		Longitude:     detail.Longitude,
 		Tees:          tees,
 		Holes:         holes,
 	})
@@ -119,7 +125,7 @@ func (h *Handler) importCourse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website)
+	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website, nil, req.FacilityType, req.Latitude, req.Longitude)
 
 	tees := make([]TeeInput, 0, len(req.Tees))
 	teeNameSeen := make(map[string]bool, len(req.Tees))
@@ -178,13 +184,16 @@ func (h *Handler) importCourse(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	detail, err := h.service.Import(ctx, auth.MustUserID(ctx), ImportCourseInput{
-		ID:      req.ID,
-		Name:    req.Name,
-		Address: req.Address,
-		Phone:   req.Phone,
-		Website: req.Website,
-		Tees:    tees,
-		Holes:   holes,
+		ID:           req.ID,
+		Name:         req.Name,
+		Address:      req.Address,
+		Phone:        req.Phone,
+		Website:      req.Website,
+		FacilityType: req.FacilityType,
+		Latitude:     req.Latitude,
+		Longitude:    req.Longitude,
+		Tees:         tees,
+		Holes:        holes,
 	})
 	if err != nil {
 		httpx.Error(w, r, err)

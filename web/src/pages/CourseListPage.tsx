@@ -6,6 +6,7 @@ import {
   Alert,
   EmptyState,
   PageSpinner,
+  PinIcon,
   PlusIcon,
   SearchIcon,
   Spinner,
@@ -86,7 +87,10 @@ export default function CourseListPage() {
     }
   }
 
-  const items = page?.items ?? []
+  const items = [...(page?.items ?? [])].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+    return 0 // preserve server name ordering within each group
+  })
   const total = page?.total ?? 0
   const showingEmpty = !loading && items.length === 0
 
@@ -175,11 +179,19 @@ export default function CourseListPage() {
               >
                 <div className="flex items-start gap-2">
                   <h2 className="font-semibold">{course.name}</h2>
-                  {!course.can_edit && (
-                    <span className="ml-auto shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                      Read only
-                    </span>
-                  )}
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    {course.pinned && (
+                      <span className="flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-800 dark:bg-brand-900 dark:text-brand-100">
+                        <PinIcon className="size-3" />
+                        Pinned
+                      </span>
+                    )}
+                    {!course.can_edit && (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                        Read only
+                      </span>
+                    )}
+                  </div>
                 </div>
                 {course.address && (
                   <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{course.address}</p>

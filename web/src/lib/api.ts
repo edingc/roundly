@@ -251,13 +251,28 @@ export const api = {
     address?: string | null
     phone?: string | null
     website?: string | null
+    notes?: string | null
+    facility_type?: string | null
+    latitude?: number | null
+    longitude?: number | null
+    pinned?: boolean
     hole_count?: number
     tees?: TeePayload[]
   }) => request<CourseDetail>('/courses', { method: 'POST', body: payload }),
 
   updateCourse: (
     id: string,
-    payload: { name: string; address?: string | null; phone?: string | null; website?: string | null },
+    payload: {
+      name: string
+      address?: string | null
+      phone?: string | null
+      website?: string | null
+      notes?: string | null
+      facility_type?: string | null
+      latitude?: number | null
+      longitude?: number | null
+      pinned?: boolean
+    },
   ) => request<CourseDetail>(`/courses/${id}`, { method: 'PUT', body: payload }),
 
   deleteCourse: (id: string) => request<void>(`/courses/${id}`, { method: 'DELETE' }),
