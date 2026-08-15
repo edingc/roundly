@@ -146,8 +146,12 @@ func (s *Service) detail(ctx context.Context, row sqlc.Course, viewerID string) 
 		holes = append(holes, toHole(h, details))
 	}
 
+	course := toCourse(row, viewerID)
+	course.HoleCount = len(holes)
+	course.TeeCount = len(tees)
+
 	return &CourseDetail{
-		Course: toCourse(row, viewerID),
+		Course: course,
 		Tees:   tees,
 		Holes:  holes,
 	}, nil

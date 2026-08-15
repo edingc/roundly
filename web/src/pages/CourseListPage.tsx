@@ -11,6 +11,7 @@ import {
   SearchIcon,
   Spinner,
   UploadIcon,
+  cx,
 } from '../components/ui'
 
 const PAGE_SIZE = 25
@@ -170,12 +171,12 @@ export default function CourseListPage() {
           />
         )
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2">
+        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {items.map((course) => (
             <li key={course.id}>
               <Link
                 to={`/courses/${course.id}`}
-                className="card block h-full p-4 transition-colors hover:border-brand-400 hover:bg-brand-50/50 dark:hover:border-brand-400 dark:hover:bg-brand-950/30"
+                className="card flex h-full flex-col p-4 transition-colors hover:border-brand-400 hover:bg-brand-50/50 dark:hover:border-brand-400 dark:hover:bg-brand-950/30"
               >
                 <div className="flex items-start gap-2">
                   <h2 className="font-semibold">{course.name}</h2>
@@ -193,9 +194,17 @@ export default function CourseListPage() {
                     )}
                   </div>
                 </div>
-                {course.address && (
-                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{course.address}</p>
-                )}
+                {/* Always rendered, even without an address, so every card
+                    reserves the same line — otherwise cards without an
+                    address end up visibly shorter than ones with one. */}
+                <p
+                  className={cx(
+                    'mt-1 text-sm text-slate-600 dark:text-slate-400',
+                    !course.address && 'invisible',
+                  )}
+                >
+                  {course.address || '—'}
+                </p>
                 <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
                   {course.hole_count} hole{course.hole_count === 1 ? '' : 's'} ·{' '}
                   {course.tee_count} tee{course.tee_count === 1 ? '' : 's'}

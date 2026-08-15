@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
 import { useAuth } from '../lib/auth'
+import { usePreferences, type StrokeIndexLabel } from '../lib/preferences'
 import { useTheme, type Theme } from '../lib/theme'
 import { Alert, Field, GoogleIcon, Spinner } from '../components/ui'
 
@@ -11,9 +12,15 @@ const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
   { value: 'system', label: 'System' },
 ]
 
+const STROKE_INDEX_LABEL_OPTIONS: Array<{ value: StrokeIndexLabel; label: string }> = [
+  { value: 'HDCP', label: 'HDCP' },
+  { value: 'SI', label: 'SI' },
+]
+
 export default function SettingsPage() {
   const { user, googleEnabled, refreshUser } = useAuth()
   const { theme, setTheme } = useTheme()
+  const { strokeIndexLabel, setStrokeIndexLabel } = usePreferences()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [linking, setLinking] = useState(false)
@@ -128,6 +135,33 @@ export default function SettingsPage() {
               onClick={() => setTheme(option.value)}
               className={
                 theme === option.value
+                  ? 'btn flex-1 bg-brand-600 text-white'
+                  : 'btn-secondary flex-1'
+              }
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="card space-y-4 p-5">
+        <div>
+          <h2 className="text-lg font-semibold">Scorecard</h2>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            How the stroke index column is labeled.
+          </p>
+        </div>
+        <div className="flex gap-2" role="radiogroup" aria-label="Stroke index label">
+          {STROKE_INDEX_LABEL_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={strokeIndexLabel === option.value}
+              onClick={() => setStrokeIndexLabel(option.value)}
+              className={
+                strokeIndexLabel === option.value
                   ? 'btn flex-1 bg-brand-600 text-white'
                   : 'btn-secondary flex-1'
               }

@@ -13,6 +13,7 @@ import {
   DownloadIcon,
   Field,
   PageSpinner,
+  PencilIcon,
   PlusIcon,
   Spinner,
   TrashIcon,
@@ -34,15 +35,24 @@ function mapsSearchUrl(address: string): string {
 }
 
 /** Builds e.g. "M 72.4/135 · W 74.8/140", omitting a gender with no rating set. */
-function formatRatings(tee: Tee): string {
+/**
+ * A 9-hole course's one rating lives in the front9_* fields (see TeeForm),
+ * since the main course_rating_men/women fields are validated on an 18-hole
+ * scale. So which pair to read depends on the course's hole count.
+ */
+function formatRatings(tee: Tee, holeCount: number): string {
+  const is9Holes = holeCount === 9
+  const courseRatingMen = is9Holes ? tee.front9_course_rating_men : tee.course_rating_men
+  const slopeRatingMen = is9Holes ? tee.front9_slope_rating_men : tee.slope_rating_men
+  const courseRatingWomen = is9Holes ? tee.front9_course_rating_women : tee.course_rating_women
+  const slopeRatingWomen = is9Holes ? tee.front9_slope_rating_women : tee.slope_rating_women
+
   const parts: string[] = []
-  if (tee.course_rating_men !== null) {
-    parts.push(`M ${tee.course_rating_men}${tee.slope_rating_men !== null ? `/${tee.slope_rating_men}` : ''}`)
+  if (courseRatingMen !== null) {
+    parts.push(`M ${courseRatingMen}${slopeRatingMen !== null ? `/${slopeRatingMen}` : ''}`)
   }
-  if (tee.course_rating_women !== null) {
-    parts.push(
-      `W ${tee.course_rating_women}${tee.slope_rating_women !== null ? `/${tee.slope_rating_women}` : ''}`,
-    )
+  if (courseRatingWomen !== null) {
+    parts.push(`W ${courseRatingWomen}${slopeRatingWomen !== null ? `/${slopeRatingWomen}` : ''}`)
   }
   return parts.join(' · ')
 }
@@ -277,6 +287,8 @@ export default function CourseDetailPage() {
               error={detailErrors.latitude}
               placeholder="Optional"
               step="any"
+              min={-90}
+              max={90}
             />
             <Field
               label="Longitude"
@@ -286,6 +298,8 @@ export default function CourseDetailPage() {
               error={detailErrors.longitude}
               placeholder="Optional"
               step="any"
+              min={-180}
+              max={180}
             />
           </div>
           <div>
@@ -372,16 +386,18 @@ export default function CourseDetailPage() {
                 </a>
               </p>
             )}
-            {course.facility_type && (
-              <p className="mt-1.5">
-                <span className="inline-block rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800 capitalize dark:bg-brand-900 dark:text-brand-100">
-                  {course.facility_type}
-                </span>
-              </p>
-            )}
-            {course.latitude != null && course.longitude != null && (
-              <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
-                {course.latitude.toFixed(6)}, {course.longitude.toFixed(6)}
+            {(course.facility_type || course.hole_count > 0) && (
+              <p className="mt-1.5 flex flex-wrap gap-1.5">
+                {course.facility_type && (
+                  <span className="inline-block rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800 capitalize dark:bg-brand-900 dark:text-brand-100">
+                    {course.facility_type}
+                  </span>
+                )}
+                {course.hole_count > 0 && (
+                  <span className="inline-block rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800 dark:bg-brand-900 dark:text-brand-100">
+                    {course.hole_count} holes
+                  </span>
+                )}
               </p>
             )}
             {course.notes && (
@@ -417,6 +433,7 @@ export default function CourseDetailPage() {
                 className="btn-secondary"
                 onClick={() => setEditingDetails(true)}
               >
+                <PencilIcon className="size-4" />
                 Edit details
               </button>
             )}
@@ -452,12 +469,12 @@ export default function CourseDetailPage() {
 
         {course.tees.length === 0 ? (
           <div className="card p-5 text-sm text-slate-600 dark:text-slate-400">
-            No tees yet. Add one to start filling in par and yardage.
+            No tees added yet.
           </div>
         ) : (
           <ul className="flex flex-wrap gap-2">
-            {course.tees.map((tee) => {
-              const ratings = formatRatings(tee)
+            {[...course.tees].sort((a, b) => b.total_yardage - a.total_yardage).map((tee) => {
+              const ratings = formatRatings(tee, course.holes.length)
               return (
                 <li
                   key={tee.id}
@@ -552,6 +569,10 @@ export default function CourseDetailPage() {
           title={teeDialog.mode === 'add' ? 'Add tee' : `Edit ${teeDialog.tee.name}`}
           initial={teeDialog.mode === 'add' ? emptyTeeForm() : teeToForm(teeDialog.tee)}
           submitLabel={teeDialog.mode === 'add' ? 'Add tee' : 'Save tee'}
+          // Derived from the actual holes on the course rather than the
+          // stored hole_count column, which can be stale (e.g. 0) on courses
+          // created before that field existed.
+          holeCount={course.holes.length}
           onCancel={() => setTeeDialog(null)}
           onSubmit={handleTeeSubmit}
         />

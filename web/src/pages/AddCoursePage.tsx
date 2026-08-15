@@ -83,7 +83,9 @@ export default function AddCoursePage() {
         longitude: longitude.trim() === '' ? null : Number(longitude),
         pinned,
         hole_count: holeCount,
-        tees: tees.filter((tee) => tee.name.trim() !== '').map(teeFormToPayload),
+        tees: tees
+          .filter((tee) => tee.name.trim() !== '')
+          .map((tee) => teeFormToPayload(tee, holeCount)),
       })
       setCreated(detail)
       setStep(3)
@@ -233,6 +235,8 @@ export default function AddCoursePage() {
               error={errors.latitude}
               placeholder="Optional"
               step="any"
+              min={-90}
+              max={90}
             />
             <Field
               label="Longitude"
@@ -242,6 +246,8 @@ export default function AddCoursePage() {
               error={errors.longitude}
               placeholder="Optional"
               step="any"
+              min={-180}
+              max={180}
             />
           </div>
           <div>
@@ -321,6 +327,7 @@ export default function AddCoursePage() {
                 errors={teeErrors(index)}
                 onChange={(values) => updateTee(index, values)}
                 idPrefix={`new-tee-${index}`}
+                holeCount={holeCount}
               />
             </div>
           ))}

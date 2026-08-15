@@ -78,23 +78,33 @@ function ratingToPayload(value: string): number | null {
   return trimmed === '' ? null : Number(trimmed)
 }
 
-/** Converts form strings to the API payload, leaving blanks as null. */
-export function teeFormToPayload(values: TeeFormValues): TeePayload {
+/**
+ * Converts form strings to the API payload, leaving blanks as null.
+ *
+ * A 9-hole course has one rating, which TeeFields binds to the front9_*
+ * fields (their 25-45 scale fits a single 9 — the main course_rating_men
+ * field is validated 50-90, an 18-hole scale). So for a 9-hole course this
+ * maps front9_* to the payload's front9_* slots as the course's one rating,
+ * and nulls out the main and back9_* fields, which the form doesn't show and
+ * whose state may hold stale values from before the hole count changed.
+ */
+export function teeFormToPayload(values: TeeFormValues, holeCount: number): TeePayload {
+  const is9Holes = holeCount === 9
   return {
     name: values.name.trim(),
     color: values.color,
-    course_rating_men: ratingToPayload(values.courseRatingMen),
-    slope_rating_men: ratingToPayload(values.slopeRatingMen),
-    course_rating_women: ratingToPayload(values.courseRatingWomen),
-    slope_rating_women: ratingToPayload(values.slopeRatingWomen),
+    course_rating_men: is9Holes ? null : ratingToPayload(values.courseRatingMen),
+    slope_rating_men: is9Holes ? null : ratingToPayload(values.slopeRatingMen),
+    course_rating_women: is9Holes ? null : ratingToPayload(values.courseRatingWomen),
+    slope_rating_women: is9Holes ? null : ratingToPayload(values.slopeRatingWomen),
     front9_course_rating_men: ratingToPayload(values.front9CourseRatingMen),
     front9_slope_rating_men: ratingToPayload(values.front9SlopeRatingMen),
-    back9_course_rating_men: ratingToPayload(values.back9CourseRatingMen),
-    back9_slope_rating_men: ratingToPayload(values.back9SlopeRatingMen),
+    back9_course_rating_men: is9Holes ? null : ratingToPayload(values.back9CourseRatingMen),
+    back9_slope_rating_men: is9Holes ? null : ratingToPayload(values.back9SlopeRatingMen),
     front9_course_rating_women: ratingToPayload(values.front9CourseRatingWomen),
     front9_slope_rating_women: ratingToPayload(values.front9SlopeRatingWomen),
-    back9_course_rating_women: ratingToPayload(values.back9CourseRatingWomen),
-    back9_slope_rating_women: ratingToPayload(values.back9SlopeRatingWomen),
+    back9_course_rating_women: is9Holes ? null : ratingToPayload(values.back9CourseRatingWomen),
+    back9_slope_rating_women: is9Holes ? null : ratingToPayload(values.back9SlopeRatingWomen),
   }
 }
 
@@ -175,12 +185,17 @@ export function TeeFields({
   errors,
   onChange,
   idPrefix,
+  holeCount,
 }: {
   values: TeeFormValues
   errors: Record<string, string>
   onChange: (values: TeeFormValues) => void
   idPrefix: string
+  /** A 9-hole course has one rating; an 18-hole course also splits front/back 9. */
+  holeCount: number
 }) {
+  const is9Holes = holeCount === 9
+
   function update<K extends keyof TeeFormValues>(key: K, value: TeeFormValues[K]) {
     onChange({ ...values, [key]: value })
   }
@@ -248,48 +263,67 @@ export function TeeFields({
             <span>Course rating</span>
             <span>Slope</span>
           </div>
-          <RatingRow
-            idPrefix={`${idPrefix}-men-18`}
-            label="18 holes"
-            courseValue={values.courseRatingMen}
-            courseError={errors.course_rating_men}
-            courseMin={50}
-            courseMax={90}
-            coursePlaceholder="72.4"
-            onCourseChange={(v) => update('courseRatingMen', v)}
-            slopeValue={values.slopeRatingMen}
-            slopeError={errors.slope_rating_men}
-            onSlopeChange={(v) => update('slopeRatingMen', v)}
-            slopePlaceholder="135"
-          />
-          <RatingRow
-            idPrefix={`${idPrefix}-men-front9`}
-            label="Front 9"
-            courseValue={values.front9CourseRatingMen}
-            courseError={errors.front9_course_rating_men}
-            courseMin={25}
-            courseMax={45}
-            coursePlaceholder="35.8"
-            onCourseChange={(v) => update('front9CourseRatingMen', v)}
-            slopeValue={values.front9SlopeRatingMen}
-            slopeError={errors.front9_slope_rating_men}
-            onSlopeChange={(v) => update('front9SlopeRatingMen', v)}
-            slopePlaceholder="133"
-          />
-          <RatingRow
-            idPrefix={`${idPrefix}-men-back9`}
-            label="Back 9"
-            courseValue={values.back9CourseRatingMen}
-            courseError={errors.back9_course_rating_men}
-            courseMin={25}
-            courseMax={45}
-            coursePlaceholder="36.6"
-            onCourseChange={(v) => update('back9CourseRatingMen', v)}
-            slopeValue={values.back9SlopeRatingMen}
-            slopeError={errors.back9_slope_rating_men}
-            onSlopeChange={(v) => update('back9SlopeRatingMen', v)}
-            slopePlaceholder="137"
-          />
+          {is9Holes ? (
+            <RatingRow
+              idPrefix={`${idPrefix}-men-9`}
+              label="Rating"
+              courseValue={values.front9CourseRatingMen}
+              courseError={errors.front9_course_rating_men}
+              courseMin={25}
+              courseMax={45}
+              coursePlaceholder="35.8"
+              onCourseChange={(v) => update('front9CourseRatingMen', v)}
+              slopeValue={values.front9SlopeRatingMen}
+              slopeError={errors.front9_slope_rating_men}
+              onSlopeChange={(v) => update('front9SlopeRatingMen', v)}
+              slopePlaceholder="133"
+            />
+          ) : (
+            <>
+              <RatingRow
+                idPrefix={`${idPrefix}-men-18`}
+                label="18 holes"
+                courseValue={values.courseRatingMen}
+                courseError={errors.course_rating_men}
+                courseMin={50}
+                courseMax={90}
+                coursePlaceholder="72.4"
+                onCourseChange={(v) => update('courseRatingMen', v)}
+                slopeValue={values.slopeRatingMen}
+                slopeError={errors.slope_rating_men}
+                onSlopeChange={(v) => update('slopeRatingMen', v)}
+                slopePlaceholder="135"
+              />
+              <RatingRow
+                idPrefix={`${idPrefix}-men-front9`}
+                label="Front 9"
+                courseValue={values.front9CourseRatingMen}
+                courseError={errors.front9_course_rating_men}
+                courseMin={25}
+                courseMax={45}
+                coursePlaceholder="35.8"
+                onCourseChange={(v) => update('front9CourseRatingMen', v)}
+                slopeValue={values.front9SlopeRatingMen}
+                slopeError={errors.front9_slope_rating_men}
+                onSlopeChange={(v) => update('front9SlopeRatingMen', v)}
+                slopePlaceholder="133"
+              />
+              <RatingRow
+                idPrefix={`${idPrefix}-men-back9`}
+                label="Back 9"
+                courseValue={values.back9CourseRatingMen}
+                courseError={errors.back9_course_rating_men}
+                courseMin={25}
+                courseMax={45}
+                coursePlaceholder="36.6"
+                onCourseChange={(v) => update('back9CourseRatingMen', v)}
+                slopeValue={values.back9SlopeRatingMen}
+                slopeError={errors.back9_slope_rating_men}
+                onSlopeChange={(v) => update('back9SlopeRatingMen', v)}
+                slopePlaceholder="137"
+              />
+            </>
+          )}
         </div>
       </div>
 
@@ -301,48 +335,67 @@ export function TeeFields({
             <span>Course rating</span>
             <span>Slope</span>
           </div>
-          <RatingRow
-            idPrefix={`${idPrefix}-women-18`}
-            label="18 holes"
-            courseValue={values.courseRatingWomen}
-            courseError={errors.course_rating_women}
-            courseMin={50}
-            courseMax={90}
-            coursePlaceholder="74.8"
-            onCourseChange={(v) => update('courseRatingWomen', v)}
-            slopeValue={values.slopeRatingWomen}
-            slopeError={errors.slope_rating_women}
-            onSlopeChange={(v) => update('slopeRatingWomen', v)}
-            slopePlaceholder="140"
-          />
-          <RatingRow
-            idPrefix={`${idPrefix}-women-front9`}
-            label="Front 9"
-            courseValue={values.front9CourseRatingWomen}
-            courseError={errors.front9_course_rating_women}
-            courseMin={25}
-            courseMax={45}
-            coursePlaceholder="37.0"
-            onCourseChange={(v) => update('front9CourseRatingWomen', v)}
-            slopeValue={values.front9SlopeRatingWomen}
-            slopeError={errors.front9_slope_rating_women}
-            onSlopeChange={(v) => update('front9SlopeRatingWomen', v)}
-            slopePlaceholder="138"
-          />
-          <RatingRow
-            idPrefix={`${idPrefix}-women-back9`}
-            label="Back 9"
-            courseValue={values.back9CourseRatingWomen}
-            courseError={errors.back9_course_rating_women}
-            courseMin={25}
-            courseMax={45}
-            coursePlaceholder="37.8"
-            onCourseChange={(v) => update('back9CourseRatingWomen', v)}
-            slopeValue={values.back9SlopeRatingWomen}
-            slopeError={errors.back9_slope_rating_women}
-            onSlopeChange={(v) => update('back9SlopeRatingWomen', v)}
-            slopePlaceholder="142"
-          />
+          {is9Holes ? (
+            <RatingRow
+              idPrefix={`${idPrefix}-women-9`}
+              label="Rating"
+              courseValue={values.front9CourseRatingWomen}
+              courseError={errors.front9_course_rating_women}
+              courseMin={25}
+              courseMax={45}
+              coursePlaceholder="37.0"
+              onCourseChange={(v) => update('front9CourseRatingWomen', v)}
+              slopeValue={values.front9SlopeRatingWomen}
+              slopeError={errors.front9_slope_rating_women}
+              onSlopeChange={(v) => update('front9SlopeRatingWomen', v)}
+              slopePlaceholder="138"
+            />
+          ) : (
+            <>
+              <RatingRow
+                idPrefix={`${idPrefix}-women-18`}
+                label="18 holes"
+                courseValue={values.courseRatingWomen}
+                courseError={errors.course_rating_women}
+                courseMin={50}
+                courseMax={90}
+                coursePlaceholder="74.8"
+                onCourseChange={(v) => update('courseRatingWomen', v)}
+                slopeValue={values.slopeRatingWomen}
+                slopeError={errors.slope_rating_women}
+                onSlopeChange={(v) => update('slopeRatingWomen', v)}
+                slopePlaceholder="140"
+              />
+              <RatingRow
+                idPrefix={`${idPrefix}-women-front9`}
+                label="Front 9"
+                courseValue={values.front9CourseRatingWomen}
+                courseError={errors.front9_course_rating_women}
+                courseMin={25}
+                courseMax={45}
+                coursePlaceholder="37.0"
+                onCourseChange={(v) => update('front9CourseRatingWomen', v)}
+                slopeValue={values.front9SlopeRatingWomen}
+                slopeError={errors.front9_slope_rating_women}
+                onSlopeChange={(v) => update('front9SlopeRatingWomen', v)}
+                slopePlaceholder="138"
+              />
+              <RatingRow
+                idPrefix={`${idPrefix}-women-back9`}
+                label="Back 9"
+                courseValue={values.back9CourseRatingWomen}
+                courseError={errors.back9_course_rating_women}
+                courseMin={25}
+                courseMax={45}
+                coursePlaceholder="37.8"
+                onCourseChange={(v) => update('back9CourseRatingWomen', v)}
+                slopeValue={values.back9SlopeRatingWomen}
+                slopeError={errors.back9_slope_rating_women}
+                onSlopeChange={(v) => update('back9SlopeRatingWomen', v)}
+                slopePlaceholder="142"
+              />
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -354,12 +407,14 @@ export function TeeDialog({
   title,
   initial,
   submitLabel,
+  holeCount,
   onCancel,
   onSubmit,
 }: {
   title: string
   initial: TeeFormValues
   submitLabel: string
+  holeCount: number
   onCancel: () => void
   onSubmit: (payload: TeePayload) => Promise<void>
 }) {
@@ -374,7 +429,7 @@ export function TeeDialog({
     setErrors({})
     setFormError(null)
     try {
-      await onSubmit(teeFormToPayload(values))
+      await onSubmit(teeFormToPayload(values, holeCount))
     } catch (error) {
       const apiError = error as { fields?: Record<string, string>; message?: string }
       if (apiError.fields && Object.keys(apiError.fields).length > 0) setErrors(apiError.fields)
@@ -398,7 +453,13 @@ export function TeeDialog({
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <TeeFields values={values} errors={errors} onChange={setValues} idPrefix="tee-dialog" />
+          <TeeFields
+            values={values}
+            errors={errors}
+            onChange={setValues}
+            idPrefix="tee-dialog"
+            holeCount={holeCount}
+          />
           <div className="flex gap-2 pt-2">
             <button type="button" onClick={onCancel} className="btn-secondary flex-1">
               Cancel

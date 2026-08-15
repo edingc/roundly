@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { CourseDetail, Hole, Tee } from '../types'
 import { api } from '../lib/api'
+import { usePreferences } from '../lib/preferences'
 import { cx } from './ui'
 
 type CellStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -12,6 +13,11 @@ interface CellDraft {
 
 function cellKey(holeId: string, teeId: string): string {
   return `${holeId}:${teeId}`
+}
+
+/** True when exactly one of par/yardage is filled in — the pair the API requires together. */
+function isHalfFilled(draft: CellDraft): boolean {
+  return (draft.par.trim() !== '') !== (draft.yardage.trim() !== '')
 }
 
 /** Builds the editable draft state from the server's course detail. */
@@ -53,6 +59,7 @@ export function ScorecardGrid({
   editable: boolean
   onCourseChanged: () => void
 }) {
+  const { strokeIndexLabel } = usePreferences()
   const [drafts, setDrafts] = useState<Record<string, CellDraft>>(() => buildDrafts(course.holes))
   const [handicaps, setHandicaps] = useState<Record<string, string>>(() =>
     buildHandicapDrafts(course.holes),
@@ -89,7 +96,9 @@ export function ScorecardGrid({
     })
   }, [course])
 
-  const tees = course.tees
+  // Longest to shortest, so the scorecard reads like a real one (back tees
+  // on the left working down to forward tees).
+  const tees = [...course.tees].sort((a, b) => b.total_yardage - a.total_yardage)
   const holes = course.holes
 
   const serverValues = useMemo(() => {
@@ -205,28 +214,48 @@ export function ScorecardGrid({
   if (tees.length === 0) {
     return (
       <div className="card p-6 text-center text-sm text-slate-600 dark:text-slate-400">
-        Add a tee first — par and yardage are recorded per tee, so the table needs at least one
-        column.
+        Add a tee first.
       </div>
     )
   }
 
+  // Ruled-grid cells, like a paper card: no floating input boxes, just a thin
+  // border per cell (from the table's own border-collapse) and a background
+  // tint for save status instead of a border color, so the grid lines stay
+  // uniform.
   const cellInputClass =
-    'w-full min-w-14 rounded-md border border-slate-300 bg-white px-1.5 py-1.5 text-center text-sm tabular-nums dark:border-slate-700 dark:bg-slate-950 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/40 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed'
+    'block w-full bg-transparent px-1 py-2 text-center text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500/60 disabled:cursor-not-allowed disabled:opacity-60'
+
+  const gridLine = 'border border-slate-200 dark:border-slate-800'
+  // A heavier rule between one tee's columns and the next, echoing the ruled
+  // sections of a real card.
+  const teeGroupStart = 'border-l-2 border-l-slate-300 dark:border-l-slate-600'
+
+  // `half` marks a cell with only par or only yardage typed in — the API
+  // needs both, so it's just sitting there unsaved rather than erroring.
+  function statusClass(status: CellStatus, half = false) {
+    if (status === 'error') return 'bg-red-50 ring-2 ring-inset ring-red-400 dark:bg-red-950/50'
+    if (status === 'saved') return 'bg-brand-50 dark:bg-brand-950/40'
+    if (half) return 'bg-amber-50 ring-1 ring-inset ring-amber-400 dark:bg-amber-950/40 dark:ring-amber-600'
+    return ''
+  }
 
   function renderRows(subset: Hole[], label: string) {
     if (subset.length === 0) return null
     return (
       <>
         {subset.map((hole) => (
-          <tr key={hole.id} className="border-t border-slate-200 dark:border-slate-800">
+          <tr key={hole.id}>
             <th
               scope="row"
-              className="sticky left-0 z-10 bg-white px-3 py-2 text-left text-sm font-semibold dark:bg-slate-900"
+              className={cx(
+                gridLine,
+                'sticky left-0 z-10 bg-white px-2 py-2 text-center text-sm font-bold dark:bg-slate-900',
+              )}
             >
               {hole.hole_number}
             </th>
-            <td className="px-2 py-2">
+            <td className={cx(gridLine, 'p-0')}>
               <input
                 type="number"
                 inputMode="numeric"
@@ -236,11 +265,7 @@ export function ScorecardGrid({
                 disabled={!editable}
                 onChange={(e) => setHandicaps((prev) => ({ ...prev, [hole.id]: e.target.value }))}
                 onBlur={() => void saveHandicap(hole)}
-                className={cx(
-                  cellInputClass,
-                  statuses[`hcp:${hole.id}`] === 'error' && 'border-red-500',
-                  statuses[`hcp:${hole.id}`] === 'saved' && 'border-brand-500',
-                )}
+                className={cx(cellInputClass, statusClass(statuses[`hcp:${hole.id}`] ?? 'idle'))}
                 aria-label={`Stroke index for hole ${hole.hole_number}`}
               />
             </td>
@@ -248,9 +273,10 @@ export function ScorecardGrid({
               const key = cellKey(hole.id, tee.id)
               const draft = drafts[key] ?? { par: '', yardage: '' }
               const status = statuses[key] ?? 'idle'
+              const half = isHalfFilled(draft)
               return (
-                <td key={tee.id} className="px-2 py-2">
-                  <div className="flex items-center gap-1">
+                <Fragment key={tee.id}>
+                  <td className={cx(gridLine, teeGroupStart, 'w-11 p-0')}>
                     <input
                       type="number"
                       inputMode="numeric"
@@ -260,14 +286,13 @@ export function ScorecardGrid({
                       disabled={!editable}
                       onChange={(e) => updateCell(hole.id, tee.id, { par: e.target.value })}
                       onBlur={() => void saveCell(hole, tee)}
-                      className={cx(
-                        cellInputClass,
-                        status === 'error' && 'border-red-500',
-                        status === 'saved' && 'border-brand-500',
-                      )}
+                      className={cx(cellInputClass, statusClass(status, half))}
                       aria-label={`Par for hole ${hole.hole_number} from the ${tee.name} tee`}
-                      placeholder="Par"
+                      title={half && draft.par.trim() === '' ? 'Add a par to save this hole.' : undefined}
+                      placeholder="—"
                     />
+                  </td>
+                  <td className={cx(gridLine, 'w-14 p-0')}>
                     <input
                       type="number"
                       inputMode="numeric"
@@ -277,39 +302,160 @@ export function ScorecardGrid({
                       disabled={!editable}
                       onChange={(e) => updateCell(hole.id, tee.id, { yardage: e.target.value })}
                       onBlur={() => void saveCell(hole, tee)}
-                      className={cx(
-                        cellInputClass,
-                        status === 'error' && 'border-red-500',
-                        status === 'saved' && 'border-brand-500',
-                      )}
+                      className={cx(cellInputClass, statusClass(status, half))}
                       aria-label={`Yardage for hole ${hole.hole_number} from the ${tee.name} tee`}
-                      placeholder="Yds"
+                      title={
+                        half && draft.yardage.trim() === '' ? 'Add a yardage to save this hole.' : undefined
+                      }
+                      placeholder="—"
                     />
-                  </div>
-                </td>
+                  </td>
+                </Fragment>
               )
             })}
           </tr>
         ))}
-        <tr className="border-t border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50">
+        <tr>
           <th
             scope="row"
-            className="sticky left-0 z-10 bg-slate-50 px-3 py-2 text-left text-xs font-semibold uppercase dark:bg-slate-800/50"
+            className={cx(
+              gridLine,
+              'sticky left-0 z-10 bg-slate-50 px-2 py-1.5 text-center text-xs font-bold uppercase tracking-wide dark:bg-slate-800/70',
+            )}
           >
             {label}
           </th>
-          <td />
+          <td className={cx(gridLine, 'bg-slate-50 dark:bg-slate-800/70')} />
           {tees.map((tee) => {
             const { par, yardage } = totals(tee, subset)
             return (
-              <td key={tee.id} className="px-2 py-2 text-center text-xs tabular-nums">
+              <td
+                key={tee.id}
+                colSpan={2}
+                className={cx(
+                  gridLine,
+                  teeGroupStart,
+                  'bg-slate-50 px-1 py-1.5 text-center text-xs tabular-nums dark:bg-slate-800/70',
+                )}
+              >
                 <span className="font-semibold">{par}</span>
-                <span className="text-slate-500 dark:text-slate-400"> · {yardage} yds</span>
+                <span className="text-slate-500 dark:text-slate-400"> · {yardage}</span>
               </td>
             )
           })}
         </tr>
       </>
+    )
+  }
+
+  function verticalTable() {
+    return (
+      <table className="w-full border-collapse">
+        <caption className="sr-only">
+          Par and yardage for each hole, by tee. Values save when you leave a field.
+        </caption>
+        <thead>
+          <tr>
+            <th
+              scope="col"
+              rowSpan={2}
+              className={cx(
+                gridLine,
+                'sticky left-0 z-10 bg-slate-50 px-2 py-1.5 text-center text-xs font-semibold uppercase tracking-wide dark:bg-slate-800/70',
+              )}
+            >
+              Hole
+            </th>
+            <th
+              scope="col"
+              rowSpan={2}
+              className={cx(
+                gridLine,
+                'bg-slate-50 px-1 py-1.5 text-center text-xs font-semibold uppercase tracking-wide dark:bg-slate-800/70',
+              )}
+            >
+              <abbr title="Stroke index (handicap)" className="no-underline">
+                {strokeIndexLabel}
+              </abbr>
+            </th>
+            {tees.map((tee) => (
+              <th
+                key={tee.id}
+                scope="colgroup"
+                colSpan={2}
+                className={cx(gridLine, teeGroupStart, 'relative bg-slate-50 px-1 pt-2 pb-1 dark:bg-slate-800/70')}
+              >
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-x-0 top-0 h-1"
+                  style={{ backgroundColor: tee.color }}
+                />
+                <span className="block truncate text-center text-xs font-bold uppercase tracking-wide">
+                  {tee.name}
+                </span>
+              </th>
+            ))}
+          </tr>
+          <tr>
+            {tees.map((tee) => (
+              <Fragment key={tee.id}>
+                <th
+                  scope="col"
+                  className={cx(
+                    gridLine,
+                    teeGroupStart,
+                    'bg-slate-50 px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-800/70 dark:text-slate-400',
+                  )}
+                >
+                  Par
+                </th>
+                <th
+                  scope="col"
+                  className={cx(
+                    gridLine,
+                    'bg-slate-50 px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-800/70 dark:text-slate-400',
+                  )}
+                >
+                  Yds
+                </th>
+              </Fragment>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {renderRows(front, 'Out')}
+          {renderRows(back, 'In')}
+          <tr>
+            <th
+              scope="row"
+              className={cx(
+                gridLine,
+                'sticky left-0 z-10 bg-slate-100 px-2 py-2 text-center text-xs font-bold uppercase dark:bg-slate-800',
+              )}
+            >
+              Total
+            </th>
+            <td className={cx(gridLine, 'bg-slate-100 dark:bg-slate-800')} />
+            {tees.map((tee) => {
+              const { par, yardage } = totals(tee, holes)
+              return (
+                <td
+                  key={tee.id}
+                  colSpan={2}
+                  className={cx(
+                    gridLine,
+                    teeGroupStart,
+                    'bg-slate-100 px-1 py-2 text-center text-xs tabular-nums dark:bg-slate-800',
+                  )}
+                >
+                  <span className="font-bold">{par}</span>
+                  <span className="text-slate-600 dark:text-slate-300"> · {yardage} yds</span>
+                </td>
+              )
+            })}
+          </tr>
+        </tbody>
+      </table>
     )
   }
 
@@ -324,77 +470,349 @@ export function ScorecardGrid({
         </div>
       )}
 
-      {/* The table is wider than a phone, so it scrolls horizontally with the
-          hole number column pinned. */}
-      <div className="card overflow-x-auto">
-        <table className="w-full min-w-max border-collapse">
-          <caption className="sr-only">
-            Par and yardage for each hole, by tee. Values save when you leave a field.
-          </caption>
-          <thead>
-            <tr className="bg-slate-50 dark:bg-slate-800/50">
-              <th
-                scope="col"
-                className="sticky left-0 z-10 bg-slate-50 px-3 py-2.5 text-left text-xs font-semibold uppercase tracking-wide dark:bg-slate-800/50"
-              >
-                Hole
-              </th>
-              <th
-                scope="col"
-                className="px-2 py-2.5 text-center text-xs font-semibold uppercase tracking-wide"
-              >
-                <abbr title="Stroke index (handicap)" className="no-underline">
-                  SI
-                </abbr>
-              </th>
-              {tees.map((tee) => (
-                <th key={tee.id} scope="col" className="px-2 py-2.5 text-center">
-                  <span className="flex items-center justify-center gap-1.5 text-xs font-semibold">
+      {/* Below md, holes run down the page (one row each) so the pinned
+          columns stay narrow on a phone. At md and up there's enough width
+          for an actual scorecard layout — holes across the top, a row per
+          tee — which also means extra tees add rows instead of ever-more
+          columns. Both tables stay mounted; only one is visible at a time,
+          which is simpler and more robust than a resize listener. */}
+      <div className="card overflow-x-auto md:hidden">{verticalTable()}</div>
+      <div className="card hidden overflow-x-auto md:block">
+        <HorizontalScorecard
+          tees={tees}
+          front={front}
+          back={back}
+          holes={holes}
+          drafts={drafts}
+          handicaps={handicaps}
+          statuses={statuses}
+          editable={editable}
+          gridLine={gridLine}
+          cellInputClass={cellInputClass}
+          statusClass={statusClass}
+          totals={totals}
+          updateCell={updateCell}
+          saveCell={saveCell}
+          setHandicaps={setHandicaps}
+          saveHandicap={saveHandicap}
+        />
+      </div>
+
+      {editable && (
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          A hole needs both par and yardage to save automatically.
+        </p>
+      )}
+    </div>
+  )
+}
+
+type Column = { kind: 'hole'; hole: Hole } | { kind: 'out' } | { kind: 'in' } | { kind: 'total' }
+
+function columnWidth(col: Column): string {
+  if (col.kind === 'hole') return 'w-9'
+  if (col.kind === 'total') return 'w-12'
+  return 'w-11'
+}
+
+function columnBg(col: Column): string {
+  if (col.kind === 'hole') return ''
+  if (col.kind === 'total') return 'bg-slate-100 dark:bg-slate-800'
+  return 'bg-slate-50 dark:bg-slate-800/70'
+}
+
+function columnLabel(col: Column): string {
+  if (col.kind === 'hole') return String(col.hole.hole_number)
+  if (col.kind === 'out') return 'Out'
+  if (col.kind === 'in') return 'In'
+  return 'Tot'
+}
+
+function columnKey(col: Column): string {
+  return col.kind === 'hole' ? col.hole.id : col.kind
+}
+
+/**
+ * The scorecard-style layout: holes run left to right, one row pair (par,
+ * yardage) per tee. Kept as a separate component, rather than inline in
+ * ScorecardGrid, purely to give the column-building logic its own scope.
+ */
+function HorizontalScorecard({
+  tees,
+  front,
+  back,
+  holes,
+  drafts,
+  handicaps,
+  statuses,
+  editable,
+  gridLine,
+  cellInputClass,
+  statusClass,
+  totals,
+  updateCell,
+  saveCell,
+  setHandicaps,
+  saveHandicap,
+}: {
+  tees: Tee[]
+  front: Hole[]
+  back: Hole[]
+  holes: Hole[]
+  drafts: Record<string, CellDraft>
+  handicaps: Record<string, string>
+  statuses: Record<string, CellStatus>
+  editable: boolean
+  gridLine: string
+  cellInputClass: string
+  statusClass: (status: CellStatus) => string
+  totals: (tee: Tee, subset: Hole[]) => { par: number; yardage: number }
+  updateCell: (holeId: string, teeId: string, patch: Partial<CellDraft>) => void
+  saveCell: (hole: Hole, tee: Tee) => Promise<void>
+  setHandicaps: (updater: (prev: Record<string, string>) => Record<string, string>) => void
+  saveHandicap: (hole: Hole) => Promise<void>
+}) {
+  const { strokeIndexLabel } = usePreferences()
+  const hasBack = back.length > 0
+  const columns: Column[] = [
+    ...front.map((hole): Column => ({ kind: 'hole', hole })),
+    { kind: 'out' },
+    ...(hasBack ? back.map((hole): Column => ({ kind: 'hole', hole })) : []),
+    ...(hasBack ? ([{ kind: 'in' }] as Column[]) : []),
+    { kind: 'total' },
+  ]
+
+  // A heavier rule above each tee's row pair, echoing the ruled sections of a
+  // real card (the horizontal counterpart of the vertical layout's
+  // between-tee column rule).
+  const teeGroupTop = 'border-t-2 border-t-slate-300 dark:border-t-slate-600'
+
+  return (
+    <table className="w-full border-collapse">
+      <caption className="sr-only">
+        Par and yardage for each hole, by tee. Values save when you leave a field.
+      </caption>
+      <thead>
+        <tr>
+          <th
+            colSpan={2}
+            scope="col"
+            className={cx(
+              gridLine,
+              'sticky left-0 z-10 bg-slate-50 px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide dark:bg-slate-800/70',
+            )}
+          >
+            Hole
+          </th>
+          {columns.map((col) => (
+            <th
+              key={columnKey(col)}
+              scope="col"
+              className={cx(
+                gridLine,
+                columnWidth(col),
+                columnBg(col),
+                'px-1 py-1.5 text-center text-xs font-bold tabular-nums',
+                col.kind !== 'hole' && 'uppercase tracking-wide',
+              )}
+            >
+              {columnLabel(col)}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th
+            colSpan={2}
+            scope="row"
+            className={cx(
+              gridLine,
+              'sticky left-0 z-10 bg-slate-50 px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-wide dark:bg-slate-800/70',
+            )}
+          >
+            <abbr title="Stroke index (handicap)" className="no-underline">
+              {strokeIndexLabel}
+            </abbr>
+          </th>
+          {columns.map((col) =>
+            col.kind === 'hole' ? (
+              <td key={columnKey(col)} className={cx(gridLine, columnWidth(col), 'p-0')}>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={18}
+                  value={handicaps[col.hole.id] ?? ''}
+                  disabled={!editable}
+                  onChange={(e) =>
+                    setHandicaps((prev) => ({ ...prev, [col.hole.id]: e.target.value }))
+                  }
+                  onBlur={() => void saveHandicap(col.hole)}
+                  className={cx(
+                    cellInputClass,
+                    statusClass(statuses[`hcp:${col.hole.id}`] ?? 'idle'),
+                  )}
+                  aria-label={`Stroke index for hole ${col.hole.hole_number}`}
+                />
+              </td>
+            ) : (
+              <td
+                key={columnKey(col)}
+                className={cx(gridLine, columnWidth(col), columnBg(col))}
+              />
+            ),
+          )}
+        </tr>
+
+        {tees.map((tee) => {
+          const outTotals = totals(tee, front)
+          const inTotals = totals(tee, back)
+          const allTotals = totals(tee, holes)
+
+          function valueFor(col: Column, field: 'par' | 'yardage'): number {
+            if (col.kind === 'out') return outTotals[field]
+            if (col.kind === 'in') return inTotals[field]
+            return allTotals[field]
+          }
+
+          return (
+            <Fragment key={tee.id}>
+              <tr>
+                <th
+                  rowSpan={2}
+                  scope="row"
+                  className={cx(
+                    gridLine,
+                    teeGroupTop,
+                    'sticky left-0 z-10 w-24 bg-white px-2 py-1 text-left align-middle dark:bg-slate-900',
+                  )}
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
                     <span
                       aria-hidden="true"
                       className="size-2.5 shrink-0 rounded-full ring-1 ring-black/15 dark:ring-white/25"
                       style={{ backgroundColor: tee.color }}
                     />
-                    {tee.name}
-                  </span>
-                  <span className="mt-0.5 block text-[10px] font-normal text-slate-500 dark:text-slate-400">
-                    par · yds
+                    <span className="truncate text-xs font-bold uppercase tracking-wide">
+                      {tee.name}
+                    </span>
                   </span>
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {renderRows(front, 'Out')}
-            {renderRows(back, 'In')}
-            <tr className="border-t-2 border-slate-300 bg-slate-100 dark:border-slate-600 dark:bg-slate-800">
-              <th
-                scope="row"
-                className="sticky left-0 z-10 bg-slate-100 px-3 py-2.5 text-left text-xs font-bold uppercase dark:bg-slate-800"
-              >
-                Total
-              </th>
-              <td />
-              {tees.map((tee) => {
-                const { par, yardage } = totals(tee, holes)
-                return (
-                  <td key={tee.id} className="px-2 py-2.5 text-center text-xs tabular-nums">
-                    <span className="font-bold">{par}</span>
-                    <span className="text-slate-600 dark:text-slate-300"> · {yardage} yds</span>
-                  </td>
-                )
-              })}
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      {editable && (
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Changes save automatically when you leave a field. Par and yardage are stored per tee, so
-          the same hole can play as a par 3 from one tee and a par 4 from another.
-        </p>
-      )}
-    </div>
+                <th
+                  scope="row"
+                  className={cx(
+                    gridLine,
+                    teeGroupTop,
+                    'sticky left-24 z-10 w-11 bg-white px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400',
+                  )}
+                >
+                  Par
+                </th>
+                {columns.map((col) => {
+                  if (col.kind === 'hole') {
+                    const hole = col.hole
+                    const key = cellKey(hole.id, tee.id)
+                    const draft = drafts[key] ?? { par: '', yardage: '' }
+                    const status = statuses[key] ?? 'idle'
+                    const half = isHalfFilled(draft)
+                    return (
+                      <td
+                        key={hole.id}
+                        className={cx(gridLine, teeGroupTop, columnWidth(col), 'p-0')}
+                      >
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={3}
+                          max={6}
+                          value={draft.par}
+                          disabled={!editable}
+                          onChange={(e) => updateCell(hole.id, tee.id, { par: e.target.value })}
+                          onBlur={() => void saveCell(hole, tee)}
+                          className={cx(cellInputClass, statusClass(status, half))}
+                          aria-label={`Par for hole ${hole.hole_number} from the ${tee.name} tee`}
+                          title={half && draft.par.trim() === '' ? 'Add a par to save this hole.' : undefined}
+                          placeholder="—"
+                        />
+                      </td>
+                    )
+                  }
+                  return (
+                    <td
+                      key={columnKey(col)}
+                      className={cx(
+                        gridLine,
+                        teeGroupTop,
+                        columnWidth(col),
+                        columnBg(col),
+                        'px-1 py-1 text-center text-xs font-semibold tabular-nums',
+                      )}
+                    >
+                      {valueFor(col, 'par')}
+                    </td>
+                  )
+                })}
+              </tr>
+              <tr>
+                <th
+                  scope="row"
+                  className={cx(
+                    gridLine,
+                    'sticky left-24 z-10 w-11 bg-white px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400',
+                  )}
+                >
+                  Yds
+                </th>
+                {columns.map((col) => {
+                  if (col.kind === 'hole') {
+                    const hole = col.hole
+                    const key = cellKey(hole.id, tee.id)
+                    const draft = drafts[key] ?? { par: '', yardage: '' }
+                    const status = statuses[key] ?? 'idle'
+                    const half = isHalfFilled(draft)
+                    return (
+                      <td key={hole.id} className={cx(gridLine, columnWidth(col), 'p-0')}>
+                        <input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          max={1000}
+                          value={draft.yardage}
+                          disabled={!editable}
+                          onChange={(e) =>
+                            updateCell(hole.id, tee.id, { yardage: e.target.value })
+                          }
+                          onBlur={() => void saveCell(hole, tee)}
+                          className={cx(cellInputClass, statusClass(status, half))}
+                          aria-label={`Yardage for hole ${hole.hole_number} from the ${tee.name} tee`}
+                          title={
+                            half && draft.yardage.trim() === '' ? 'Add a yardage to save this hole.' : undefined
+                          }
+                          placeholder="—"
+                        />
+                      </td>
+                    )
+                  }
+                  return (
+                    <td
+                      key={columnKey(col)}
+                      className={cx(
+                        gridLine,
+                        columnWidth(col),
+                        columnBg(col),
+                        'px-1 py-1 text-center text-xs tabular-nums text-slate-600 dark:text-slate-300',
+                      )}
+                    >
+                      {valueFor(col, 'yardage')}
+                    </td>
+                  )
+                })}
+              </tr>
+            </Fragment>
+          )
+        })}
+      </tbody>
+    </table>
   )
 }

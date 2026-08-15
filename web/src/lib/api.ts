@@ -46,8 +46,15 @@ export class ApiError extends Error {
 let accessToken: string | null = null
 let onSessionExpired: (() => void) | null = null
 
-/** Deduplicates concurrent refreshes so parallel 401s trigger only one call. */
-let refreshInFlight: Promise<string | null> | null = null
+/**
+ * Deduplicates concurrent refreshes so parallel callers — a 401 retry racing
+ * the boot-time restore, or React StrictMode's double-invoked mount effect —
+ * trigger only one call. Refresh tokens are single-use and rotated; a second
+ * concurrent call would present the same now-consumed token, which the
+ * server treats as a replay and responds to by revoking every session for
+ * the user, including the one the first call just issued.
+ */
+let refreshInFlight: Promise<Session | null> | null = null
 
 export function getAccessToken(): string | null {
   return accessToken
@@ -132,7 +139,7 @@ async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> 
  * requests at once after the access token expires does not burn several
  * single-use refresh tokens and trip the server's replay defense.
  */
-async function refreshSession(): Promise<string | null> {
+async function refreshSession(): Promise<Session | null> {
   if (refreshInFlight) return refreshInFlight
 
   refreshInFlight = (async () => {
@@ -145,7 +152,7 @@ async function refreshSession(): Promise<string | null> {
         auth: false,
       })
       setSession(session)
-      return session.access_token
+      return session
     } catch {
       setSession(null)
       return null
@@ -167,8 +174,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     const canRetry = error instanceof ApiError && error.status === 401 && options.auth !== false
     if (!canRetry) throw error
 
-    const token = await refreshSession()
-    if (!token) {
+    const session = await refreshSession()
+    if (!session) {
       onSessionExpired?.()
       throw error
     }
@@ -176,22 +183,17 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   }
 }
 
-/** Restores a session on app start. Returns null when not signed in. */
+/**
+ * Restores a session on app start. Returns null when not signed in.
+ *
+ * Goes through refreshSession's shared refreshInFlight rather than issuing
+ * its own request, so that React StrictMode double-invoking this effect (or
+ * any other incidental double-call) doesn't present the same single-use
+ * refresh token twice — see the note on refreshInFlight above.
+ */
 export async function restoreSession(): Promise<Session | null> {
-  const stored = getStoredRefreshToken()
-  if (!stored) return null
-  try {
-    const session = await rawRequest<Session>('/auth/refresh', {
-      method: 'POST',
-      body: { refresh_token: stored },
-      auth: false,
-    })
-    setSession(session)
-    return session
-  } catch {
-    setSession(null)
-    return null
-  }
+  if (!getStoredRefreshToken()) return null
+  return refreshSession()
 }
 
 export const api = {

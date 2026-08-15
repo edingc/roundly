@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { AuthProvider } from './lib/auth'
+import { PreferencesProvider } from './lib/preferences'
 import { ThemeProvider } from './lib/theme'
 import './index.css'
 
@@ -13,9 +14,11 @@ createRoot(container).render(
   <StrictMode>
     <BrowserRouter>
       <ThemeProvider>
-        <AuthProvider>
-          <App />
-        </AuthProvider>
+        <PreferencesProvider>
+          <AuthProvider>
+            <App />
+          </AuthProvider>
+        </PreferencesProvider>
       </ThemeProvider>
     </BrowserRouter>
   </StrictMode>,
