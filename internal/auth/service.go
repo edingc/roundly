@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,8 +38,20 @@ type User struct {
 	EmailVerified bool     `json:"email_verified"`
 	HasPassword   bool     `json:"has_password"`
 	Providers     []string `json:"providers"`
-	CreatedAt     string   `json:"created_at"`
+	// DistanceUnit is a display preference: every distance in the database is
+	// stored in yards, and the client converts on the way in and out.
+	DistanceUnit string `json:"distance_unit"`
+	CreatedAt    string `json:"created_at"`
 }
+
+// Distance units the app understands.
+const (
+	UnitYards  = "yards"
+	UnitMeters = "meters"
+)
+
+// DistanceUnits are the accepted values for User.DistanceUnit.
+var DistanceUnits = []string{UnitYards, UnitMeters}
 
 // Session is what a successful login returns.
 type Session struct {
@@ -59,6 +72,13 @@ func (s *Service) toUser(ctx context.Context, row sqlc.User) (*User, error) {
 		providers = append(providers, a.Provider)
 	}
 
+	unit := row.DistanceUnit
+	if unit == "" {
+		// Defensive: the column is NOT NULL with a default, but a row written
+		// by an older binary during a rolling restart would read back empty.
+		unit = UnitYards
+	}
+
 	return &User{
 		ID:            row.ID,
 		Email:         row.Email,
@@ -66,8 +86,32 @@ func (s *Service) toUser(ctx context.Context, row sqlc.User) (*User, error) {
 		EmailVerified: row.EmailVerified != 0,
 		HasPassword:   row.PasswordHash != nil && *row.PasswordHash != "",
 		Providers:     providers,
+		DistanceUnit:  unit,
 		CreatedAt:     row.CreatedAt,
 	}, nil
+}
+
+// SetDistanceUnit changes the unit the caller reads and enters distances in.
+// Nothing stored is rewritten — the database stays in yards.
+func (s *Service) SetDistanceUnit(ctx context.Context, userID, unit string) (*User, error) {
+	if !slices.Contains(DistanceUnits, unit) {
+		return nil, httpx.ValidationError(map[string]string{
+			"distance_unit": "Choose either yards or meters.",
+		})
+	}
+
+	if err := s.db.Queries.UpdateUserDistanceUnit(ctx, sqlc.UpdateUserDistanceUnitParams{
+		DistanceUnit: unit,
+		ID:           userID,
+	}); err != nil {
+		return nil, httpx.Internal(fmt.Errorf("update distance unit: %w", err))
+	}
+
+	row, err := s.db.Queries.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, httpx.Internal(fmt.Errorf("reload user: %w", err))
+	}
+	return s.toUser(ctx, row)
 }
 
 // SignUp creates an account from an email and password.

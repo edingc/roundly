@@ -23,27 +23,30 @@ func (q *Queries) CountActiveClubs(ctx context.Context, userID string) (int64, e
 const createClub = `-- name: CreateClub :exec
 INSERT INTO clubs (
     id, user_id, club_type, label, brand, model, loft, shaft, flex, notes,
+    expected_carry, average_dispersion,
     active, retired_at, display_order, created_at, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateClubParams struct {
-	ID           string
-	UserID       string
-	ClubType     string
-	Label        string
-	Brand        *string
-	Model        *string
-	Loft         *float64
-	Shaft        *string
-	Flex         *string
-	Notes        *string
-	Active       int64
-	RetiredAt    *string
-	DisplayOrder int64
-	CreatedAt    string
-	UpdatedAt    string
+	ID                string
+	UserID            string
+	ClubType          string
+	Label             string
+	Brand             *string
+	Model             *string
+	Loft              *float64
+	Shaft             *string
+	Flex              *string
+	Notes             *string
+	ExpectedCarry     *int64
+	AverageDispersion *int64
+	Active            int64
+	RetiredAt         *string
+	DisplayOrder      int64
+	CreatedAt         string
+	UpdatedAt         string
 }
 
 func (q *Queries) CreateClub(ctx context.Context, arg CreateClubParams) error {
@@ -58,6 +61,8 @@ func (q *Queries) CreateClub(ctx context.Context, arg CreateClubParams) error {
 		arg.Shaft,
 		arg.Flex,
 		arg.Notes,
+		arg.ExpectedCarry,
+		arg.AverageDispersion,
 		arg.Active,
 		arg.RetiredAt,
 		arg.DisplayOrder,
@@ -77,7 +82,7 @@ func (q *Queries) DeleteClub(ctx context.Context, id string) error {
 }
 
 const getClub = `-- name: GetClub :one
-SELECT id, user_id, club_type, label, brand, model, loft, shaft, flex, notes, active, retired_at, display_order, created_at, updated_at FROM clubs WHERE id = ?
+SELECT id, user_id, club_type, label, brand, model, loft, shaft, flex, notes, active, retired_at, display_order, created_at, updated_at, expected_carry, average_dispersion FROM clubs WHERE id = ?
 `
 
 func (q *Queries) GetClub(ctx context.Context, id string) (Club, error) {
@@ -99,12 +104,14 @@ func (q *Queries) GetClub(ctx context.Context, id string) (Club, error) {
 		&i.DisplayOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExpectedCarry,
+		&i.AverageDispersion,
 	)
 	return i, err
 }
 
 const listClubsByUser = `-- name: ListClubsByUser :many
-SELECT id, user_id, club_type, label, brand, model, loft, shaft, flex, notes, active, retired_at, display_order, created_at, updated_at FROM clubs
+SELECT id, user_id, club_type, label, brand, model, loft, shaft, flex, notes, active, retired_at, display_order, created_at, updated_at, expected_carry, average_dispersion FROM clubs
 WHERE user_id = ?
 ORDER BY display_order ASC, created_at ASC
 `
@@ -134,6 +141,8 @@ func (q *Queries) ListClubsByUser(ctx context.Context, userID string) ([]Club, e
 			&i.DisplayOrder,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ExpectedCarry,
+			&i.AverageDispersion,
 		); err != nil {
 			return nil, err
 		}
@@ -186,22 +195,25 @@ func (q *Queries) SetClubStatus(ctx context.Context, arg SetClubStatusParams) er
 const updateClub = `-- name: UpdateClub :exec
 UPDATE clubs
 SET club_type = ?, label = ?, brand = ?, model = ?, loft = ?, shaft = ?,
-    flex = ?, notes = ?, display_order = ?, updated_at = ?
+    flex = ?, notes = ?, expected_carry = ?, average_dispersion = ?,
+    display_order = ?, updated_at = ?
 WHERE id = ?
 `
 
 type UpdateClubParams struct {
-	ClubType     string
-	Label        string
-	Brand        *string
-	Model        *string
-	Loft         *float64
-	Shaft        *string
-	Flex         *string
-	Notes        *string
-	DisplayOrder int64
-	UpdatedAt    string
-	ID           string
+	ClubType          string
+	Label             string
+	Brand             *string
+	Model             *string
+	Loft              *float64
+	Shaft             *string
+	Flex              *string
+	Notes             *string
+	ExpectedCarry     *int64
+	AverageDispersion *int64
+	DisplayOrder      int64
+	UpdatedAt         string
+	ID                string
 }
 
 func (q *Queries) UpdateClub(ctx context.Context, arg UpdateClubParams) error {
@@ -214,6 +226,8 @@ func (q *Queries) UpdateClub(ctx context.Context, arg UpdateClubParams) error {
 		arg.Shaft,
 		arg.Flex,
 		arg.Notes,
+		arg.ExpectedCarry,
+		arg.AverageDispersion,
 		arg.DisplayOrder,
 		arg.UpdatedAt,
 		arg.ID,

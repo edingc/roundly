@@ -77,6 +77,10 @@ type ClubInput struct {
 	Shaft *string
 	Flex  *string
 	Notes *string
+	// ExpectedCarry and AverageDispersion are in yards, and are always nil for
+	// a putter — the handler rejects them rather than silently dropping them.
+	ExpectedCarry     *int
+	AverageDispersion *int
 	// DisplayOrder is optional; a new club without one is appended to the bag.
 	DisplayOrder *int
 	// Status defaults to StatusActive on create, and is ignored on update —
@@ -105,21 +109,23 @@ func (s *Service) Create(ctx context.Context, userID string, in ClubInput) (*Clu
 	now := timex.Now()
 	active, retiredAt := statusColumns(status, now)
 	err := s.db.Queries.CreateClub(ctx, sqlc.CreateClubParams{
-		ID:           clubID,
-		UserID:       userID,
-		ClubType:     in.Type,
-		Label:        strings.TrimSpace(in.Label),
-		Brand:        normalizeOptional(in.Brand),
-		Model:        normalizeOptional(in.Model),
-		Loft:         in.Loft,
-		Shaft:        normalizeOptional(in.Shaft),
-		Flex:         normalizeOptional(in.Flex),
-		Notes:        normalizeOptional(in.Notes),
-		Active:       active,
-		RetiredAt:    retiredAt,
-		DisplayOrder: int64(order),
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:                clubID,
+		UserID:            userID,
+		ClubType:          in.Type,
+		Label:             strings.TrimSpace(in.Label),
+		Brand:             normalizeOptional(in.Brand),
+		Model:             normalizeOptional(in.Model),
+		Loft:              in.Loft,
+		Shaft:             normalizeOptional(in.Shaft),
+		Flex:              normalizeOptional(in.Flex),
+		Notes:             normalizeOptional(in.Notes),
+		ExpectedCarry:     intToInt64Ptr(in.ExpectedCarry),
+		AverageDispersion: intToInt64Ptr(in.AverageDispersion),
+		Active:            active,
+		RetiredAt:         retiredAt,
+		DisplayOrder:      int64(order),
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	})
 	if err != nil {
 		return nil, httpx.Internal(fmt.Errorf("create club: %w", err))
@@ -149,17 +155,19 @@ func (s *Service) Update(ctx context.Context, userID, clubID string, in ClubInpu
 	}
 
 	err = s.db.Queries.UpdateClub(ctx, sqlc.UpdateClubParams{
-		ClubType:     in.Type,
-		Label:        strings.TrimSpace(in.Label),
-		Brand:        normalizeOptional(in.Brand),
-		Model:        normalizeOptional(in.Model),
-		Loft:         in.Loft,
-		Shaft:        normalizeOptional(in.Shaft),
-		Flex:         normalizeOptional(in.Flex),
-		Notes:        normalizeOptional(in.Notes),
-		DisplayOrder: int64(order),
-		UpdatedAt:    timex.Now(),
-		ID:           clubID,
+		ClubType:          in.Type,
+		Label:             strings.TrimSpace(in.Label),
+		Brand:             normalizeOptional(in.Brand),
+		Model:             normalizeOptional(in.Model),
+		Loft:              in.Loft,
+		Shaft:             normalizeOptional(in.Shaft),
+		Flex:              normalizeOptional(in.Flex),
+		Notes:             normalizeOptional(in.Notes),
+		ExpectedCarry:     intToInt64Ptr(in.ExpectedCarry),
+		AverageDispersion: intToInt64Ptr(in.AverageDispersion),
+		DisplayOrder:      int64(order),
+		UpdatedAt:         timex.Now(),
+		ID:                clubID,
 	})
 	if err != nil {
 		return nil, httpx.Internal(fmt.Errorf("update club: %w", err))

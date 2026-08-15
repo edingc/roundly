@@ -31,8 +31,14 @@ const ClubLimit = 14
 // drift from what the server will accept.
 var Types = []string{"driver", "wood", "hybrid", "iron", "wedge", "putter"}
 
-// Flexes are the recognized shaft flex values, soft to stiff.
-var Flexes = []string{"ladies", "senior", "regular", "stiff", "x-stiff"}
+// Flexes are the recognized shaft flex values, soft to stiff. "wedge" trails
+// the list rather than slotting into it: wedge shafts are sold under their own
+// designation (W) and are not a point on the ladies-to-x-stiff scale.
+var Flexes = []string{"ladies", "senior", "regular", "stiff", "x-stiff", "wedge"}
+
+// NoDistanceType is the one club type that carries neither an expected carry
+// nor a dispersion. Both describe a full shot, which a putter never hits.
+const NoDistanceType = "putter"
 
 // Club is one club a player owns.
 type Club struct {
@@ -45,11 +51,16 @@ type Club struct {
 	Model *string `json:"model"`
 	// Loft is in degrees, and fractional because wedges are sold in half
 	// degrees.
-	Loft   *float64 `json:"loft"`
-	Shaft  *string  `json:"shaft"`
-	Flex   *string  `json:"flex"`
-	Notes  *string  `json:"notes"`
-	Status Status   `json:"status"`
+	Loft  *float64 `json:"loft"`
+	Shaft *string  `json:"shaft"`
+	Flex  *string  `json:"flex"`
+	Notes *string  `json:"notes"`
+	// ExpectedCarry is in yards: how far the player expects to fly this club.
+	// Null for putters, and null until the player fills it in.
+	ExpectedCarry *int `json:"expected_carry"`
+	// AverageDispersion is in yards: the typical spread around that carry.
+	AverageDispersion *int   `json:"average_dispersion"`
+	Status            Status `json:"status"`
 	// RetiredAt is set only for retired clubs.
 	RetiredAt    *string `json:"retired_at"`
 	DisplayOrder int     `json:"display_order"`
@@ -93,20 +104,38 @@ func statusOf(row sqlc.Club) Status {
 
 func toClub(row sqlc.Club) Club {
 	return Club{
-		ID:           row.ID,
-		UserID:       row.UserID,
-		Type:         row.ClubType,
-		Label:        row.Label,
-		Brand:        row.Brand,
-		Model:        row.Model,
-		Loft:         row.Loft,
-		Shaft:        row.Shaft,
-		Flex:         row.Flex,
-		Notes:        row.Notes,
-		Status:       statusOf(row),
-		RetiredAt:    row.RetiredAt,
-		DisplayOrder: int(row.DisplayOrder),
-		CreatedAt:    row.CreatedAt,
-		UpdatedAt:    row.UpdatedAt,
+		ID:                row.ID,
+		UserID:            row.UserID,
+		Type:              row.ClubType,
+		Label:             row.Label,
+		Brand:             row.Brand,
+		Model:             row.Model,
+		Loft:              row.Loft,
+		Shaft:             row.Shaft,
+		Flex:              row.Flex,
+		Notes:             row.Notes,
+		ExpectedCarry:     int64PtrToIntPtr(row.ExpectedCarry),
+		AverageDispersion: int64PtrToIntPtr(row.AverageDispersion),
+		Status:            statusOf(row),
+		RetiredAt:         row.RetiredAt,
+		DisplayOrder:      int(row.DisplayOrder),
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
 	}
+}
+
+func int64PtrToIntPtr(v *int64) *int {
+	if v == nil {
+		return nil
+	}
+	converted := int(*v)
+	return &converted
+}
+
+func intToInt64Ptr(v *int) *int64 {
+	if v == nil {
+		return nil
+	}
+	converted := int64(*v)
+	return &converted
 }

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
-import { useAuth } from '../lib/auth'
+import { useAuth, useDistanceUnit } from '../lib/auth'
 import { usePreferences, type StrokeIndexLabel } from '../lib/preferences'
 import { useTheme, type Theme } from '../lib/theme'
+import type { DistanceUnit } from '../lib/units'
 import { Alert, Field, GoogleIcon, Spinner } from '../components/ui'
 
 const THEME_OPTIONS: Array<{ value: Theme; label: string }> = [
@@ -17,6 +18,11 @@ const STROKE_INDEX_LABEL_OPTIONS: Array<{ value: StrokeIndexLabel; label: string
   { value: 'SI', label: 'SI' },
 ]
 
+const DISTANCE_UNIT_OPTIONS: Array<{ value: DistanceUnit; label: string }> = [
+  { value: 'yards', label: 'Yards' },
+  { value: 'meters', label: 'Meters' },
+]
+
 export default function SettingsPage() {
   const { user, googleEnabled, refreshUser } = useAuth()
   const { theme, setTheme } = useTheme()
@@ -26,6 +32,10 @@ export default function SettingsPage() {
   const [linking, setLinking] = useState(false)
   const [linkError, setLinkError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+
+  const distanceUnit = useDistanceUnit()
+  const [savingUnit, setSavingUnit] = useState(false)
+  const [unitError, setUnitError] = useState<string | null>(null)
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -65,6 +75,24 @@ export default function SettingsPage() {
     } catch (error) {
       setLinkError(error instanceof ApiError ? error.message : 'Could not start Google linking.')
       setLinking(false)
+    }
+  }
+
+  /**
+   * Saves the unit, then refreshes the user so every screen reading
+   * `user.distance_unit` re-renders. Nothing stored changes.
+   */
+  async function handleUnitChange(unit: DistanceUnit) {
+    if (unit === distanceUnit) return
+    setSavingUnit(true)
+    setUnitError(null)
+    try {
+      await api.setDistanceUnit(unit)
+      await refreshUser()
+    } catch (error) {
+      setUnitError(error instanceof ApiError ? error.message : 'Could not change the unit.')
+    } finally {
+      setSavingUnit(false)
     }
   }
 
@@ -135,6 +163,36 @@ export default function SettingsPage() {
               onClick={() => setTheme(option.value)}
               className={
                 theme === option.value
+                  ? 'btn flex-1 bg-brand-600 text-white'
+                  : 'btn-secondary flex-1'
+              }
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="card space-y-4 p-5">
+        <div>
+          <h2 className="text-lg font-semibold">Distances</h2>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            The unit for hole yardages, tee totals, and club carry. Stored
+            distances are not rewritten, so switching back shows the same numbers.
+          </p>
+        </div>
+        {unitError && <Alert>{unitError}</Alert>}
+        <div className="flex gap-2" role="radiogroup" aria-label="Distance unit">
+          {DISTANCE_UNIT_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={distanceUnit === option.value}
+              disabled={savingUnit}
+              onClick={() => void handleUnitChange(option.value)}
+              className={
+                distanceUnit === option.value
                   ? 'btn flex-1 bg-brand-600 text-white'
                   : 'btn-secondary flex-1'
               }

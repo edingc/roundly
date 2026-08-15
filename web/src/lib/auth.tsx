@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api, restoreSession, setSession, setSessionExpiredHandler } from './api'
-import type { Session, User } from '../types'
+import type { DistanceUnit, Session, User } from '../types'
 
 interface AuthState {
   user: User | null
@@ -104,4 +104,15 @@ export function useAuth(): AuthState {
   const context = useContext(AuthContext)
   if (!context) throw new Error('useAuth must be used inside an AuthProvider')
   return context
+}
+
+/**
+ * The unit the signed-in user reads distances in, for the screens that show or
+ * collect one. Falls back to yards, which is both the server default and the
+ * unit everything is stored in, so a screen rendering before the user loads
+ * shows stored values unconverted rather than wrong.
+ */
+export function useDistanceUnit(): DistanceUnit {
+  const { user } = useAuth()
+  return user?.distance_unit ?? 'yards'
 }

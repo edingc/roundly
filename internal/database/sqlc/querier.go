@@ -63,6 +63,7 @@ type Querier interface {
 	UpdateHole(ctx context.Context, arg UpdateHoleParams) error
 	UpdateTee(ctx context.Context, arg UpdateTeeParams) error
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) error
+	UpdateUserDistanceUnit(ctx context.Context, arg UpdateUserDistanceUnitParams) error
 	UpsertHoleTeeDetail(ctx context.Context, arg UpsertHoleTeeDetailParams) error
 }
 

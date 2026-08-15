@@ -1,9 +1,10 @@
 -- name: CreateClub :exec
 INSERT INTO clubs (
     id, user_id, club_type, label, brand, model, loft, shaft, flex, notes,
+    expected_carry, average_dispersion,
     active, retired_at, display_order, created_at, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetClub :one
 SELECT * FROM clubs WHERE id = ?;
@@ -16,7 +17,8 @@ ORDER BY display_order ASC, created_at ASC;
 -- name: UpdateClub :exec
 UPDATE clubs
 SET club_type = ?, label = ?, brand = ?, model = ?, loft = ?, shaft = ?,
-    flex = ?, notes = ?, display_order = ?, updated_at = ?
+    flex = ?, notes = ?, expected_carry = ?, average_dispersion = ?,
+    display_order = ?, updated_at = ?
 WHERE id = ?;
 
 -- name: SetClubStatus :exec

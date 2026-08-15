@@ -138,6 +138,7 @@ All routes are under `/api`. Everything except the auth endpoints below requires
 | `GET` | `/auth/me` | Current user *(auth)* |
 | `POST` | `/auth/link/google` | Begin linking Google to this account *(auth)* |
 | `POST` | `/auth/password` | Set or change the password *(auth)* |
+| `PUT` | `/auth/preferences` | `{distance_unit}` — `yards` or `meters` *(auth)* |
 
 **Courses** *(all require auth)*
 
@@ -194,6 +195,23 @@ than merely avoided. Retiring is a soft delete: the row and its ID survive, whic
 is what lets Phase 3 rounds and Phase 4 shots keep pointing at the club that hit
 them. Status changes go through their own endpoint, so saving an edit form can
 never move a club between groups by accident.
+
+Every club but a putter also carries an **expected carry** and an **average
+dispersion**, both optional. Phase 4 compares recorded shots
+against them rather than replacing them: the derived number does not exist until
+rounds have been played, and dispersion is not something a player can eyeball.
+A putter has neither, and sending either on one is a validation error rather
+than a silent null. The bag screen also hides loft and shaft flex on a putter —
+those are real specs, just not ones worth collecting, so that half of the rule
+is presentation only and the API keeps accepting them.
+
+**Distances are stored in yards and displayed in the user's unit.** Every
+distance in the database — hole yardages, tee totals, club carry and dispersion
+— is yards. `users.distance_unit` (`yards` or `meters`, set under Settings →
+Distances) is a display preference applied at the input and display boundary by
+`web/src/lib/units.ts`. Switching it rewrites nothing, so switching back shows
+the original numbers. Course export stays in yards so a shared course file does
+not depend on who exported it.
 
 ## Testing
 

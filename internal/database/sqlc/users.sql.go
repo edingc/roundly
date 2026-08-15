@@ -36,7 +36,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, email_verified, created_at FROM users WHERE email = ?
+SELECT id, email, password_hash, display_name, email_verified, created_at, distance_unit FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -49,12 +49,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.DisplayName,
 		&i.EmailVerified,
 		&i.CreatedAt,
+		&i.DistanceUnit,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, email_verified, created_at FROM users WHERE id = ?
+SELECT id, email, password_hash, display_name, email_verified, created_at, distance_unit FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -67,6 +68,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.DisplayName,
 		&i.EmailVerified,
 		&i.CreatedAt,
+		&i.DistanceUnit,
 	)
 	return i, err
 }
@@ -110,5 +112,19 @@ type UpdateUserDisplayNameParams struct {
 
 func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) error {
 	_, err := q.db.ExecContext(ctx, updateUserDisplayName, arg.DisplayName, arg.ID)
+	return err
+}
+
+const updateUserDistanceUnit = `-- name: UpdateUserDistanceUnit :exec
+UPDATE users SET distance_unit = ? WHERE id = ?
+`
+
+type UpdateUserDistanceUnitParams struct {
+	DistanceUnit string
+	ID           string
+}
+
+func (q *Queries) UpdateUserDistanceUnit(ctx context.Context, arg UpdateUserDistanceUnitParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserDistanceUnit, arg.DistanceUnit, arg.ID)
 	return err
 }

@@ -1,6 +1,21 @@
 import { useState } from 'react'
 import type { Club, ClubPayload } from '../types'
+import { useDistanceUnit } from '../lib/auth'
+import {
+  boundFromYards,
+  fromYards,
+  toYards,
+  unitLabel,
+  unitSuffix,
+  type DistanceUnit,
+} from '../lib/units'
 import { Alert, Field, Spinner, cx } from './ui'
+
+/** Carry and dispersion bounds, in the yards the server validates against. */
+const CARRY_MIN_YARDS = 1
+const CARRY_MAX_YARDS = 400
+const DISPERSION_MIN_YARDS = 0
+const DISPERSION_MAX_YARDS = 150
 
 /**
  * Display names for the club types the server knows about. Anything the server
@@ -21,7 +36,25 @@ const FLEX_LABELS: Record<string, string> = {
   senior: 'Senior (A)',
   regular: 'Regular (R)',
   stiff: 'Stiff (S)',
-  'x-stiff': 'Extra stiff (X)',
+  'x-stiff': 'Extra Stiff (X)',
+  wedge: 'Wedge (W)',
+}
+
+/**
+ * Whether a club type gets the full spec set: loft, flex, expected carry, and
+ * average dispersion. Only a putter does not.
+ *
+ * Two different reasons are bundled here, and they differ in how hard the rule
+ * is. Carry and dispersion describe a full shot, which a putter never hits, so
+ * the *server* rejects them on one. Loft and flex are real on a putter — 3.5°
+ * is a genuine spec — but not worth the form space, so they are merely hidden
+ * here and stay perfectly valid over the API.
+ *
+ * Kept as one helper so the form and the payload cannot disagree about which
+ * fields a putter shows.
+ */
+export function hasFullSpecs(clubType: string): boolean {
+  return clubType !== 'putter'
 }
 
 /** Falls back to title-casing so an unknown value from the server still reads well. */
@@ -52,13 +85,26 @@ export interface ClubFormValues {
   shaft: string
   flex: string
   notes: string
+  expectedCarry: string
+  averageDispersion: string
 }
 
 export function emptyClubForm(clubType = 'iron'): ClubFormValues {
-  return { clubType, label: '', loft: '', brand: '', model: '', shaft: '', flex: '', notes: '' }
+  return {
+    clubType,
+    label: '',
+    loft: '',
+    brand: '',
+    model: '',
+    shaft: '',
+    flex: '',
+    notes: '',
+    expectedCarry: '',
+    averageDispersion: '',
+  }
 }
 
-export function clubToForm(club: Club): ClubFormValues {
+export function clubToForm(club: Club, unit: DistanceUnit): ClubFormValues {
   return {
     clubType: club.club_type,
     label: club.label,
@@ -68,6 +114,11 @@ export function clubToForm(club: Club): ClubFormValues {
     shaft: club.shaft ?? '',
     flex: club.flex ?? '',
     notes: club.notes ?? '',
+    // Stored in yards; shown in whatever the user reads.
+    expectedCarry:
+      club.expected_carry === null ? '' : String(fromYards(club.expected_carry, unit)),
+    averageDispersion:
+      club.average_dispersion === null ? '' : String(fromYards(club.average_dispersion, unit)),
   }
 }
 
@@ -77,18 +128,39 @@ function optional(value: string): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-export function clubFormToPayload(values: ClubFormValues): ClubPayload {
-  const loft = values.loft.trim()
+/** Blank numeric fields become null; anything else is sent as a number. */
+function optionalNumber(value: string): number | null {
+  const trimmed = value.trim()
+  return trimmed === '' ? null : Number(trimmed)
+}
+
+export function clubFormToPayload(values: ClubFormValues, unit: DistanceUnit): ClubPayload {
+  // A putter sends null for every hidden field regardless of what the inputs
+  // still hold. For carry and dispersion this is required — the server rejects
+  // them on a putter, so re-typing a club would otherwise fail validation on
+  // values the form is no longer showing. For loft and flex it is a choice: a
+  // club converted to a putter should not keep an invisible 10.5° and a stiff
+  // shaft that resurface if it is converted back.
+  const full = hasFullSpecs(values.clubType)
   return {
     club_type: values.clubType,
     label: values.label.trim(),
     brand: optional(values.brand),
     model: optional(values.model),
-    loft: loft === '' ? null : Number(loft),
+    loft: full ? optionalNumber(values.loft) : null,
     shaft: optional(values.shaft),
-    flex: optional(values.flex),
+    flex: full ? optional(values.flex) : null,
     notes: optional(values.notes),
+    // Converted back to the yards the API stores.
+    expected_carry: full ? toStoredYards(values.expectedCarry, unit) : null,
+    average_dispersion: full ? toStoredYards(values.averageDispersion, unit) : null,
   }
+}
+
+/** A blank distance field is null; anything else converts to stored yards. */
+function toStoredYards(value: string, unit: DistanceUnit): number | null {
+  const parsed = optionalNumber(value)
+  return parsed === null ? null : toYards(parsed, unit)
 }
 
 /** A modal for adding or editing one club. */
@@ -109,6 +181,7 @@ export function ClubDialog({
   onCancel: () => void
   onSubmit: (payload: ClubPayload) => Promise<void>
 }) {
+  const unit = useDistanceUnit()
   const [values, setValues] = useState<ClubFormValues>(initial)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [formError, setFormError] = useState<string | null>(null)
@@ -124,7 +197,7 @@ export function ClubDialog({
     setErrors({})
     setFormError(null)
     try {
-      await onSubmit(clubFormToPayload(values))
+      await onSubmit(clubFormToPayload(values, unit))
     } catch (error) {
       const apiError = error as { fields?: Record<string, string>; message?: string }
       if (apiError.fields && Object.keys(apiError.fields).length > 0) setErrors(apiError.fields)
@@ -180,19 +253,21 @@ export function ClubDialog({
             maxLength={60}
           />
 
-          <Field
-            id="club-loft"
-            label="Loft (degrees)"
-            type="number"
-            inputMode="decimal"
-            step="0.5"
-            min={0}
-            max={75}
-            value={values.loft}
-            onChange={(e) => update('loft', e.target.value)}
-            error={errors.loft}
-            placeholder="56"
-          />
+          {hasFullSpecs(values.clubType) && (
+            <Field
+              id="club-loft"
+              label="Loft (degrees)"
+              type="number"
+              inputMode="decimal"
+              step="0.5"
+              min={0}
+              max={75}
+              value={values.loft}
+              onChange={(e) => update('loft', e.target.value)}
+              error={errors.loft}
+              placeholder="56"
+            />
+          )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field
@@ -215,6 +290,39 @@ export function ClubDialog({
             />
           </div>
 
+          {hasFullSpecs(values.clubType) && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field
+                id="club-carry"
+                label="Expected carry"
+                type="number"
+                inputMode="numeric"
+                min={boundFromYards(CARRY_MIN_YARDS, unit, 'min')}
+                max={boundFromYards(CARRY_MAX_YARDS, unit, 'max')}
+                value={values.expectedCarry}
+                onChange={(e) => update('expectedCarry', e.target.value)}
+                error={errors.expected_carry}
+                placeholder={String(fromYards(158, unit))}
+                suffix={unitSuffix(unit)}
+                aria-label={`Expected carry in ${unitLabel(unit).toLowerCase()}`}
+              />
+              <Field
+                id="club-dispersion"
+                label="Average dispersion"
+                type="number"
+                inputMode="numeric"
+                min={boundFromYards(DISPERSION_MIN_YARDS, unit, 'min')}
+                max={boundFromYards(DISPERSION_MAX_YARDS, unit, 'max')}
+                value={values.averageDispersion}
+                onChange={(e) => update('averageDispersion', e.target.value)}
+                error={errors.average_dispersion}
+                placeholder={String(fromYards(12, unit))}
+                suffix={unitSuffix(unit)}
+                aria-label={`Average dispersion in ${unitLabel(unit).toLowerCase()}`}
+              />
+            </div>
+          )}
+
           <Field
             id="club-shaft"
             label="Shaft"
@@ -225,25 +333,27 @@ export function ClubDialog({
             maxLength={120}
           />
 
-          <div>
-            <label htmlFor="club-flex" className="label">
-              Flex
-            </label>
-            <select
-              id="club-flex"
-              value={values.flex}
-              onChange={(e) => update('flex', e.target.value)}
-              className={cx('input', errors.flex && 'input-error')}
-            >
-              <option value="">Not set</option>
-              {flexes.map((flex) => (
-                <option key={flex} value={flex}>
-                  {flexLabel(flex)}
-                </option>
-              ))}
-            </select>
-            {errors.flex && <p className="field-error">{errors.flex}</p>}
-          </div>
+          {hasFullSpecs(values.clubType) && (
+            <div>
+              <label htmlFor="club-flex" className="label">
+                Flex
+              </label>
+              <select
+                id="club-flex"
+                value={values.flex}
+                onChange={(e) => update('flex', e.target.value)}
+                className={cx('input', errors.flex && 'input-error')}
+              >
+                <option value="">Not set</option>
+                {flexes.map((flex) => (
+                  <option key={flex} value={flex}>
+                    {flexLabel(flex)}
+                  </option>
+                ))}
+              </select>
+              {errors.flex && <p className="field-error">{errors.flex}</p>}
+            </div>
+          )}
 
           <div>
             <label htmlFor="club-notes" className="label">
@@ -256,7 +366,6 @@ export function ClubDialog({
               className={cx('input', errors.notes && 'input-error')}
               rows={2}
               maxLength={2000}
-              placeholder="Regripped spring 2026"
             />
             {errors.notes && <p className="field-error">{errors.notes}</p>}
           </div>

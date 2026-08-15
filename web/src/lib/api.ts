@@ -5,6 +5,7 @@ import type {
   ClubOptions,
   ClubPayload,
   ClubStatus,
+  DistanceUnit,
   CourseDetail,
   CourseExport,
   CoursePage,
@@ -241,6 +242,14 @@ export const api = {
       method: 'POST',
       body: { current_password: currentPassword, new_password: newPassword },
     }),
+
+  /**
+   * Changes the unit distances are shown and entered in. Returns the whole
+   * user so the caller refreshes its copy rather than patching one field.
+   * Nothing stored is rewritten — the database stays in yards.
+   */
+  setDistanceUnit: (unit: DistanceUnit) =>
+    request<User>('/auth/preferences', { method: 'PUT', body: { distance_unit: unit } }),
 
   listCourses: (params: { q?: string; limit?: number; offset?: number } = {}) => {
     const query = new URLSearchParams()

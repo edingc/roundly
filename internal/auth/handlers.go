@@ -71,6 +71,7 @@ func (h *Handler) Routes() chi.Router {
 		pr.Get("/link/google", h.googleStart)
 		pr.Post("/link/google", h.googleStart)
 		pr.Post("/password", h.setPassword)
+		pr.Put("/preferences", h.setPreferences)
 	})
 
 	return r
@@ -213,6 +214,29 @@ func (h *Handler) setPassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := h.service.CurrentUser(ctx, MustUserID(ctx))
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, user)
+}
+
+type preferencesRequest struct {
+	DistanceUnit string `json:"distance_unit"`
+}
+
+// setPreferences updates the caller's display preferences and returns the whole
+// user, so the client refreshes its copy in one round trip rather than
+// patching a field locally and hoping it matches.
+func (h *Handler) setPreferences(w http.ResponseWriter, r *http.Request) {
+	var req preferencesRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	ctx := r.Context()
+	user, err := h.service.SetDistanceUnit(ctx, MustUserID(ctx), strings.ToLower(strings.TrimSpace(req.DistanceUnit)))
 	if err != nil {
 		httpx.Error(w, r, err)
 		return

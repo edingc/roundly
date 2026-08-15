@@ -5,21 +5,23 @@
 package sqlc
 
 type Club struct {
-	ID           string
-	UserID       string
-	ClubType     string
-	Label        string
-	Brand        *string
-	Model        *string
-	Loft         *float64
-	Shaft        *string
-	Flex         *string
-	Notes        *string
-	Active       int64
-	RetiredAt    *string
-	DisplayOrder int64
-	CreatedAt    string
-	UpdatedAt    string
+	ID                string
+	UserID            string
+	ClubType          string
+	Label             string
+	Brand             *string
+	Model             *string
+	Loft              *float64
+	Shaft             *string
+	Flex              *string
+	Notes             *string
+	Active            int64
+	RetiredAt         *string
+	DisplayOrder      int64
+	CreatedAt         string
+	UpdatedAt         string
+	ExpectedCarry     *int64
+	AverageDispersion *int64
 }
 
 type Course struct {
@@ -99,4 +101,5 @@ type User struct {
 	DisplayName   string
 	EmailVerified int64
 	CreatedAt     string
+	DistanceUnit  string
 }

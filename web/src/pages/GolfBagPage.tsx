@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ApiError, api } from '../lib/api'
+import { useDistanceUnit } from '../lib/auth'
+import { formatDistance, type DistanceUnit } from '../lib/units'
 import type { Bag, Club, ClubOptions, ClubPayload, ClubStatus } from '../types'
 import {
   Alert,
@@ -18,6 +20,7 @@ import {
   clubTypeLabel,
   emptyClubForm,
   flexLabel,
+  hasFullSpecs,
   type ClubFormValues,
 } from '../components/ClubForm'
 
@@ -53,12 +56,24 @@ function bagOrder(clubs: Club[], clubTypes: string[]): Club[] {
   })
 }
 
-/** The secondary meta line under a club's name: brand, model, shaft, flex. */
-function clubMeta(club: Club): string {
+/**
+ * The secondary meta line under a club's name: brand, model, shaft, flex, and
+ * dispersion. Carry is not here — it earns a place on the first line, since it
+ * is the number a player actually reaches for.
+ *
+ * Flex is dropped for a putter to match the form, which does not collect it.
+ * Reading the club type rather than trusting the value to be null matters:
+ * putters created before the form hid the field may still have one stored.
+ */
+function clubMeta(club: Club, unit: DistanceUnit): string {
+  const full = hasFullSpecs(club.club_type)
   return [
     [club.brand, club.model].filter(Boolean).join(' '),
     club.shaft,
-    club.flex ? flexLabel(club.flex) : null,
+    full && club.flex ? flexLabel(club.flex) : null,
+    club.average_dispersion === null
+      ? null
+      : `±${formatDistance(club.average_dispersion, unit)}`,
   ]
     .filter((part): part is string => Boolean(part && part.trim()))
     .join(' · ')
@@ -94,18 +109,20 @@ function RowAction({
 
 function ClubRow({
   club,
+  unit,
   busy,
   onMove,
   onEdit,
   onDelete,
 }: {
   club: Club
+  unit: DistanceUnit
   busy: boolean
   onMove: (status: ClubStatus) => void
   onEdit: () => void
   onDelete: () => void
 }) {
-  const meta = clubMeta(club)
+  const meta = clubMeta(club, unit)
 
   return (
     <li
@@ -115,18 +132,27 @@ function ClubRow({
       )}
     >
       <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-2">
+        <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="font-medium">{club.label}</span>
-          {club.loft !== null && (
+          {hasFullSpecs(club.club_type) && club.loft !== null && (
             <span className="text-sm text-slate-500 tabular-nums dark:text-slate-400">
               {club.loft}°
             </span>
           )}
+          {club.expected_carry !== null && (
+            <span className="text-sm font-medium text-brand-700 tabular-nums dark:text-brand-300">
+              {formatDistance(club.expected_carry, unit)}
+            </span>
+          )}
         </div>
-        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-          {clubTypeLabel(club.club_type)}
-          {meta && ` · ${meta}`}
-        </p>
+        {/* A club entered as nothing but "4 Iron" gets one line and no more.
+            The type leads this line when it renders, but does not earn a line
+            on its own — under a label like "4 Iron" it only repeats it. */}
+        {meta && (
+          <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            {clubTypeLabel(club.club_type)} · {meta}
+          </p>
+        )}
         {club.notes && (
           <p className="mt-1 text-xs text-slate-500 italic dark:text-slate-400">{club.notes}</p>
         )}
@@ -194,6 +220,7 @@ function Section({
 }
 
 export default function GolfBagPage() {
+  const unit = useDistanceUnit()
   const [bag, setBag] = useState<Bag | null>(null)
   const [options, setOptions] = useState<ClubOptions | null>(null)
   const [loading, setLoading] = useState(true)
@@ -258,7 +285,7 @@ export default function GolfBagPage() {
   const defaultType = clubTypes.includes('iron') ? 'iron' : (clubTypes[0] ?? 'iron')
   const initialForm: ClubFormValues | null = editing
     ? editing.mode === 'edit'
-      ? clubToForm(editing.club)
+      ? clubToForm(editing.club, unit)
       : emptyClubForm(defaultType)
     : null
 
@@ -341,6 +368,7 @@ export default function GolfBagPage() {
               <ClubRow
                 key={club.id}
                 club={club}
+                unit={unit}
                 busy={busyId === club.id}
                 onMove={(status) => void move(club, status)}
                 onEdit={() => setEditing({ mode: 'edit', club })}
@@ -358,6 +386,7 @@ export default function GolfBagPage() {
               <ClubRow
                 key={club.id}
                 club={club}
+                unit={unit}
                 busy={busyId === club.id}
                 onMove={(status) => void move(club, status)}
                 onEdit={() => setEditing({ mode: 'edit', club })}
@@ -389,13 +418,14 @@ export default function GolfBagPage() {
               {showRetired && (
                 <>
                   <p className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                    Kept so past rounds still show the club that hit each shot.
+                    Retired clubs are kept for statistical purposes.
                   </p>
                   <ul className="divide-y divide-slate-200 border-t border-slate-200 dark:divide-slate-800 dark:border-slate-800">
                     {retired.map((club) => (
                       <ClubRow
                         key={club.id}
                         club={club}
+                        unit={unit}
                         busy={busyId === club.id}
                         onMove={(status) => void move(club, status)}
                         onEdit={() => setEditing({ mode: 'edit', club })}

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -104,6 +106,41 @@ func TestCreateClubDefaultsToActiveAndTrims(t *testing.T) {
 	if len(bag.Active) != 1 || len(bag.Benched) != 0 || len(bag.Retired) != 0 {
 		t.Fatalf("bag groups = %d/%d/%d, want 1/0/0",
 			len(bag.Active), len(bag.Benched), len(bag.Retired))
+	}
+}
+
+// Type and label are the only required fields. A player who wants nothing more
+// than "4 Iron" in their bag should not be made to fill anything else in.
+func TestTypeAndLabelAreTheOnlyRequiredFields(t *testing.T) {
+	svc, db := newTestService(t)
+	owner := createUser(t, db, "owner@example.com")
+
+	c := addClub(t, svc, owner, ClubInput{Type: "iron", Label: "4 Iron"})
+
+	if c.Label != "4 Iron" || c.Type != "iron" {
+		t.Fatalf("club = %q/%q, want %q/%q", c.Label, c.Type, "4 Iron", "iron")
+	}
+	// Everything else comes back empty rather than defaulted to something.
+	for name, value := range map[string]any{
+		"brand":              c.Brand,
+		"model":              c.Model,
+		"loft":               c.Loft,
+		"shaft":              c.Shaft,
+		"flex":               c.Flex,
+		"notes":              c.Notes,
+		"expected_carry":     c.ExpectedCarry,
+		"average_dispersion": c.AverageDispersion,
+	} {
+		if !reflect.ValueOf(value).IsNil() {
+			t.Errorf("%s = %v, want nil on a bare club", name, value)
+		}
+	}
+
+	// And the request-level validator agrees: nothing but type and label.
+	v := httpx.NewValidator()
+	validateClub(v, clubRequest{Type: "iron", Label: "4 Iron"})
+	if err := v.Err(); err != nil {
+		t.Errorf("a type-and-label-only request was rejected: %v", err)
 	}
 }
 
@@ -422,6 +459,129 @@ func TestBlankFlexClears(t *testing.T) {
 	}
 	if in.Flex != nil {
 		t.Errorf("flex = %q, want nil", *in.Flex)
+	}
+}
+
+func TestCarryAndDispersionRoundTrip(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	c := addClub(t, svc, owner, ClubInput{
+		Type:              "iron",
+		Label:             "7 iron",
+		ExpectedCarry:     ptr(158),
+		AverageDispersion: ptr(12),
+	})
+	if c.ExpectedCarry == nil || *c.ExpectedCarry != 158 {
+		t.Errorf("expected_carry = %v, want 158", c.ExpectedCarry)
+	}
+	if c.AverageDispersion == nil || *c.AverageDispersion != 12 {
+		t.Errorf("average_dispersion = %v, want 12", c.AverageDispersion)
+	}
+
+	// Clearing them is how a player says "I no longer know this".
+	cleared, err := svc.Update(ctx, owner, c.ID, ClubInput{Type: "iron", Label: "7 iron"})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if cleared.ExpectedCarry != nil || cleared.AverageDispersion != nil {
+		t.Errorf("distances = %v/%v, want both cleared",
+			cleared.ExpectedCarry, cleared.AverageDispersion)
+	}
+}
+
+func TestPutterRejectsCarryAndDispersion(t *testing.T) {
+	tests := map[string]clubRequest{
+		"carry": {Type: "putter", Label: "Putter", ExpectedCarry: ptr(30)},
+		"dispersion": {
+			Type: "putter", Label: "Putter", AverageDispersion: ptr(3),
+		},
+	}
+
+	for name, req := range tests {
+		t.Run(name, func(t *testing.T) {
+			v := httpx.NewValidator()
+			validateClub(v, req)
+
+			err := v.Err()
+			if err == nil {
+				t.Fatalf("a putter with a %s was accepted", name)
+			}
+			var apiErr *httpx.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("expected an *httpx.APIError, got %T", err)
+			}
+			field := "expected_carry"
+			if name == "dispersion" {
+				field = "average_dispersion"
+			}
+			if _, ok := apiErr.Fields[field]; !ok {
+				t.Errorf("fields = %v, want a message on %q", apiErr.Fields, field)
+			}
+		})
+	}
+
+	// A putter with neither is exactly the normal case.
+	v := httpx.NewValidator()
+	validateClub(v, clubRequest{Type: "putter", Label: "Putter", Loft: ptr(3.5)})
+	if err := v.Err(); err != nil {
+		t.Errorf("a plain putter was rejected: %v", err)
+	}
+}
+
+func TestDistanceBounds(t *testing.T) {
+	tests := map[string]struct {
+		req       clubRequest
+		wantField string
+	}{
+		"carry at the ceiling":   {req: clubRequest{Type: "driver", Label: "Driver", ExpectedCarry: ptr(maxCarry)}},
+		"carry over the ceiling": {req: clubRequest{Type: "driver", Label: "Driver", ExpectedCarry: ptr(maxCarry + 1)}, wantField: "expected_carry"},
+		"carry of zero":          {req: clubRequest{Type: "driver", Label: "Driver", ExpectedCarry: ptr(0)}, wantField: "expected_carry"},
+		"dispersion of zero":     {req: clubRequest{Type: "iron", Label: "7 iron", AverageDispersion: ptr(0)}},
+		"dispersion over":        {req: clubRequest{Type: "iron", Label: "7 iron", AverageDispersion: ptr(maxDispersion + 1)}, wantField: "average_dispersion"},
+		"negative dispersion":    {req: clubRequest{Type: "iron", Label: "7 iron", AverageDispersion: ptr(-1)}, wantField: "average_dispersion"},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			v := httpx.NewValidator()
+			validateClub(v, tc.req)
+			err := v.Err()
+
+			if tc.wantField == "" {
+				if err != nil {
+					t.Fatalf("expected no validation error, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected a validation error on %q", tc.wantField)
+			}
+			var apiErr *httpx.APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("expected an *httpx.APIError, got %T", err)
+			}
+			if _, ok := apiErr.Fields[tc.wantField]; !ok {
+				t.Errorf("fields = %v, want a message on %q", apiErr.Fields, tc.wantField)
+			}
+		})
+	}
+}
+
+// Wedge flex is a real shaft designation, so it has to be accepted alongside
+// the ladies-to-x-stiff scale.
+func TestWedgeFlexIsAccepted(t *testing.T) {
+	v := httpx.NewValidator()
+	in := validateClub(v, clubRequest{Type: "wedge", Label: "56° SW", Flex: ptr("Wedge")})
+	if err := v.Err(); err != nil {
+		t.Fatalf("wedge flex was rejected: %v", err)
+	}
+	if in.Flex == nil || *in.Flex != "wedge" {
+		t.Errorf("flex = %v, want normalized to %q", in.Flex, "wedge")
+	}
+	if !slices.Contains(Flexes, "wedge") {
+		t.Error("wedge is missing from the advertised Flexes list")
 	}
 }
 

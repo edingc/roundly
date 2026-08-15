@@ -29,6 +29,13 @@ binary:
 - [x] The schema rejects a club that is both retired and active
 - [x] Club type, shaft flex, loft range, and status values are validated
 - [x] Derived bag order puts the putter last despite its low loft
+- [x] Expected carry and average dispersion round-trip, and clear when blanked
+- [x] A putter is refused both, by field, on create and on update
+- [x] Carry and dispersion bounds, including dispersion of zero being allowed
+- [x] "Wedge" is accepted as a shaft flex and normalized from any casing
+- [x] A club saves with nothing but a type and a label, everything else null
+- [x] `distance_unit` defaults to yards, persists, and rejects anything else
+      without changing the stored value
 
 ## Manual pass
 
@@ -42,6 +49,21 @@ binary:
 - [ ] Try to save with the label blank. The form refuses before sending.
 - [ ] Enter 155 in the loft box. The server rejects it and the message lands on
       the loft field, not as a page-level error.
+- [ ] Give an iron an expected carry and an average dispersion. The carry shows
+      on the club's first line in brand green; the dispersion shows as `±n yds`
+      on the meta line.
+- [ ] Set the type to Putter. Loft, flex, expected carry, and average
+      dispersion all disappear from the form, leaving type, label, brand,
+      model, shaft, and notes.
+- [ ] Save that putter. It saves cleanly — the form sends null for each hidden
+      field rather than the values it was holding.
+- [ ] Edit an existing iron that has a loft and distances and re-type it as a
+      putter. Same result: it saves, and none of those values come back if you
+      switch it to an iron again.
+- [ ] A putter row shows no loft and no flex, even if the club was created
+      before those fields were hidden.
+- [ ] Pick "Wedge (W)" as the shaft flex on a wedge. It saves and shows in the
+      meta line.
 - [ ] Add enough clubs to reach 14. The counter reads **14 / 14** in green with
       no warning.
 - [ ] Add a 15th. It is accepted, the counter turns amber and reads **15 / 14**,
@@ -71,6 +93,27 @@ binary:
 - [ ] With a full bag, confirm the order reads driver → woods → hybrids → irons
       → wedges → putter, with the putter last despite its low loft.
 - [ ] Add a 3 wood after a 5 wood. The 3 wood sorts *above* it, by loft.
+
+### Distance units
+
+- [ ] Settings → Distances offers Yards and Meters, starting on Yards.
+- [ ] Switch to Meters. The bag's carry and dispersion, the scorecard grid, and
+      the tee totals all convert; loft stays in degrees.
+- [ ] The scorecard's distance row header reads `M`, not `Yds`.
+- [ ] A tee's total beside its name matches the `TOT` cell at the end of its
+      scorecard row. *(These round differently if the total is converted rather
+      than summed after conversion — that mismatch is the bug this catches.)*
+- [ ] Type a hole distance in metres. It saves, and still reads back as what you
+      typed.
+- [ ] Switch back to Yards. Every number is the original one — nothing was
+      rewritten by the switch.
+- [ ] Export a course while in Meters. The file contains yards.
+- [ ] Add a club with a carry while in Meters, then switch to Yards and confirm
+      the club shows the equivalent yard figure.
+- [ ] In the club form, the unit sits inside the carry and dispersion inputs
+      against the right edge, and follows the setting (`yds` / `m`).
+- [ ] Clicking that unit puts the caret in the input rather than doing nothing.
+- [ ] Type the largest allowed carry. The digits do not run under the unit.
 
 ### Privacy
 

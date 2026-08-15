@@ -427,3 +427,48 @@ func TestGoogleProviderDisabledWithoutCredentials(t *testing.T) {
 		}
 	}
 }
+
+// The distance unit is a display preference. It defaults to yards, which is
+// what every stored distance is in, and switching it rewrites nothing.
+func TestDistanceUnitPreference(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	session, err := svc.SignUp(ctx, "golfer@example.com", "correct horse battery staple", "Golfer")
+	if err != nil {
+		t.Fatalf("sign up: %v", err)
+	}
+	if session.User.DistanceUnit != UnitYards {
+		t.Errorf("new account unit = %q, want %q", session.User.DistanceUnit, UnitYards)
+	}
+
+	updated, err := svc.SetDistanceUnit(ctx, session.User.ID, UnitMeters)
+	if err != nil {
+		t.Fatalf("set meters: %v", err)
+	}
+	if updated.DistanceUnit != UnitMeters {
+		t.Errorf("unit = %q, want %q", updated.DistanceUnit, UnitMeters)
+	}
+
+	// It survives a reload rather than living only in the response.
+	reloaded, err := svc.CurrentUser(ctx, session.User.ID)
+	if err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if reloaded.DistanceUnit != UnitMeters {
+		t.Errorf("reloaded unit = %q, want %q", reloaded.DistanceUnit, UnitMeters)
+	}
+
+	// And an unknown unit is a field-level validation error, not a silent default.
+	if _, err := svc.SetDistanceUnit(ctx, session.User.ID, "furlongs"); err == nil {
+		t.Error("expected an error for an unknown unit")
+	}
+
+	after, err := svc.CurrentUser(ctx, session.User.ID)
+	if err != nil {
+		t.Fatalf("reload after rejection: %v", err)
+	}
+	if after.DistanceUnit != UnitMeters {
+		t.Errorf("a rejected unit changed the stored value to %q", after.DistanceUnit)
+	}
+}

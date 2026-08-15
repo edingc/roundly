@@ -127,9 +127,65 @@ Delivered as `internal/club` plus the `/bag` screen. The API table is in
 - **A bag is private, unlike the course directory.** Every query is scoped by
   `user_id`. Another user's club ID returns 404, not 403 — confirming that an ID
   exists would leak more than the refusal is worth.
-- **No expected-distance field.** The original sketch had one for Phase 4 to
-  compare against. Dropped: Phase 4 derives club distances from recorded shots,
-  and a hand-entered number would be a second, staler source of truth.
+- **Expected carry and average dispersion on every club but the putter.** This reverses a call made mid-build. The first pass dropped a
+  distance field on the reasoning that Phase 4 derives distances from recorded
+  shots, so a hand-entered number would be a staler second source of truth. That
+  was wrong on two counts: the derived number does not exist until rounds have
+  been played, and dispersion is not something a player can eyeball at all, so
+  there is nothing to be stale *against*. Phase 4 now compares against these
+  rather than replacing them.
+- **A putter shows none of loft, flex, carry, or dispersion,** but for two
+  different reasons, and the split is deliberate. Carry and dispersion describe
+  a full shot a putter never hits, so the *server* rejects them. Loft and flex
+  are real on a putter — 3.5° is a genuine spec — but not worth the form space,
+  so they are hidden in the UI only and stay valid over the API. That avoids a
+  destructive migration over existing putter rows: the UI reads the club type
+  rather than trusting the column to be null, so stored values are hidden
+  immediately and cleared lazily the next time the club is saved.
+- **Carry and dispersion on a putter are refused, not nulled.** Both describe a
+  full shot.
+  Sending either on a putter is a 422 naming the field, rather than a silent
+  null — a client that re-types a club as a putter without clearing the boxes
+  should be told, not quietly stripped of numbers the player typed. The rule
+  lives in `internal/club` rather than a CHECK constraint: SQLite cannot add a
+  table-level CHECK through `ALTER TABLE`, and rebuilding the table for a domain
+  rule is a poor trade against the retired/active CHECK, which guards an actual
+  data-integrity invariant.
+- **"Wedge" is a shaft flex.** It is a real designation (W) sold on wedge
+  shafts, and it trails the list rather than slotting into it, because it is not
+  a point on the ladies-to-x-stiff scale.
+- **Only type and label are required.** A player who wants nothing in their bag
+  but "4 Iron" should not be made to fill in a loft to save it, and the bag list
+  drops the detail line entirely for a club that has no detail.
+
+### Distance units
+
+Adding carry and dispersion raised the question of metres, which turned out to
+be bigger than the bag: hole yardages and tee totals are distances too, and a
+bag reading in metres beside a scorecard reading in yards would be worse than
+either alone. So this is a whole-app preference, added here rather than deferred.
+
+- **One per-user setting, `users.distance_unit`,** defaulting to yards. It
+  applies to the scorecard grid, tee totals, the course forms, and club carry
+  and dispersion.
+- **Stored canonically in yards; converted only at the display and input
+  boundary,** in `web/src/lib/units.ts`. A unit column per value would let one
+  bag hold both at once and would force every read site to convert anyway.
+  Switching the setting rewrites nothing, so switching back shows the original
+  numbers exactly.
+- **Course export stays in yards.** A course file moving between instances must
+  not depend on the exporting user's display preference.
+- **Totals are summed after conversion, not converted after summing.** The
+  scorecard column rounds each hole and adds those up; converting the stored
+  total instead rounds once and can differ by a metre or two, which is visible
+  when the tee chip and the grid total sit on the same screen.
+- **Rounding is to whole units in both directions.** A metre value can drift by
+  a yard on a round trip, which is under half a metre on a distance nobody
+  measures to better than a pace. Storing fractional yards would put decimals
+  into a grid that has always held whole numbers.
+- **A unit switch re-seeds the scorecard drafts** rather than merging them. The
+  merge that protects unsaved edits after a save is wrong here: a number
+  half-typed in yards means something else in metres.
 - **Bag order is derived, not arranged.** The list sorts by club type, then loft
   ascending, which produces the real layout (driver → woods → hybrids → irons →
   wedges → putter) with no reordering UI. `display_order` is stored and settable,

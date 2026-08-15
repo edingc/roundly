@@ -16,3 +16,6 @@ UPDATE users SET email_verified = ? WHERE id = ?;
 
 -- name: UpdateUserDisplayName :exec
 UPDATE users SET display_name = ? WHERE id = ?;
+
+-- name: UpdateUserDistanceUnit :exec
+UPDATE users SET distance_unit = ? WHERE id = ?;

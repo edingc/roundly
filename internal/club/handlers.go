@@ -19,6 +19,17 @@ import (
 const (
 	minLoft = 0.0
 	maxLoft = 75.0
+
+	// Carry bounds in yards. The ceiling clears the longest realistic drive
+	// while still catching a total distance typed in metres or a stray loft.
+	minCarry = 1
+	maxCarry = 400
+
+	// Dispersion bounds in yards. Zero is allowed — a player who has not
+	// measured a spread yet may legitimately enter it as unknown-but-tight —
+	// and the ceiling catches a carry typed into the wrong box.
+	minDispersion = 0
+	maxDispersion = 150
 )
 
 // Handler exposes the golf bag endpoints.
@@ -76,15 +87,17 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 type clubRequest struct {
-	Type         string   `json:"club_type"`
-	Label        string   `json:"label"`
-	Brand        *string  `json:"brand"`
-	Model        *string  `json:"model"`
-	Loft         *float64 `json:"loft"`
-	Shaft        *string  `json:"shaft"`
-	Flex         *string  `json:"flex"`
-	Notes        *string  `json:"notes"`
-	DisplayOrder *int     `json:"display_order"`
+	Type              string   `json:"club_type"`
+	Label             string   `json:"label"`
+	Brand             *string  `json:"brand"`
+	Model             *string  `json:"model"`
+	Loft              *float64 `json:"loft"`
+	Shaft             *string  `json:"shaft"`
+	Flex              *string  `json:"flex"`
+	Notes             *string  `json:"notes"`
+	ExpectedCarry     *int     `json:"expected_carry"`
+	AverageDispersion *int     `json:"average_dispersion"`
+	DisplayOrder      *int     `json:"display_order"`
 	// Status is honored on create only, so a club can be added straight to the
 	// bench. Update ignores it in favor of the status endpoint.
 	Status string `json:"status"`
@@ -217,16 +230,42 @@ func validateClub(v *httpx.Validator, req clubRequest) ClubInput {
 		v.MaxLen("notes", strings.TrimSpace(*req.Notes), 2000)
 	}
 
+	validateDistances(v, clubType, req.ExpectedCarry, req.AverageDispersion)
+
 	return ClubInput{
-		Type:         clubType,
-		Label:        req.Label,
-		Brand:        req.Brand,
-		Model:        req.Model,
-		Loft:         req.Loft,
-		Shaft:        req.Shaft,
-		Flex:         flex,
-		Notes:        req.Notes,
-		DisplayOrder: req.DisplayOrder,
+		Type:              clubType,
+		Label:             req.Label,
+		Brand:             req.Brand,
+		Model:             req.Model,
+		Loft:              req.Loft,
+		Shaft:             req.Shaft,
+		Flex:              flex,
+		Notes:             req.Notes,
+		ExpectedCarry:     req.ExpectedCarry,
+		AverageDispersion: req.AverageDispersion,
+		DisplayOrder:      req.DisplayOrder,
+	}
+}
+
+// validateDistances bounds carry and dispersion, and refuses either on a
+// putter. Refusing rather than quietly nulling them means a client that
+// re-types a club as a putter without clearing the boxes is told so, instead of
+// silently losing numbers the player entered.
+func validateDistances(v *httpx.Validator, clubType string, carry, dispersion *int) {
+	if clubType == NoDistanceType {
+		if carry != nil {
+			v.Add("expected_carry", "A putter does not carry, so leave this empty.")
+		}
+		if dispersion != nil {
+			v.Add("average_dispersion", "A putter has no shot dispersion, so leave this empty.")
+		}
+		return
+	}
+	if carry != nil {
+		v.IntBetween("expected_carry", *carry, minCarry, maxCarry)
+	}
+	if dispersion != nil {
+		v.IntBetween("average_dispersion", *dispersion, minDispersion, maxDispersion)
 	}
 }
 

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
+import { useDistanceUnit } from '../lib/auth'
+import { fromYards, unitSuffix, type DistanceUnit } from '../lib/units'
 import { formatPhone, phoneHref } from '../lib/phone'
 import { slugify } from '../lib/slug'
 import type { CourseDetail, Tee, TeePayload } from '../types'
@@ -57,9 +59,28 @@ function formatRatings(tee: Tee, holeCount: number): string {
   return parts.join(' · ')
 }
 
+/**
+ * A tee's total in the display unit, summed hole by hole.
+ *
+ * Deliberately not `fromYards(tee.total_yardage)`. Converting the server's yard
+ * total rounds once, while the scorecard column rounds each hole and adds those
+ * up — on the same screen the two can differ by a metre or two. Summing the way
+ * the grid does keeps the number beside the tee equal to the number at the end
+ * of its row. In yards the two are identical anyway.
+ */
+function teeTotal(course: CourseDetail, teeId: string, unit: DistanceUnit): number {
+  let total = 0
+  for (const hole of course.holes) {
+    const detail = hole.tee_details.find((d) => d.tee_id === teeId)
+    if (detail) total += fromYards(detail.yardage, unit)
+  }
+  return total
+}
+
 export default function CourseDetailPage() {
   const { courseId } = useParams<{ courseId: string }>()
   const navigate = useNavigate()
+  const unit = useDistanceUnit()
 
   const [course, setCourse] = useState<CourseDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -488,7 +509,9 @@ export default function CourseDetailPage() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium">{tee.name}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {tee.total_yardage > 0 ? `${tee.total_yardage} yds` : 'No yardages yet'}
+                      {tee.total_yardage > 0
+                        ? `${teeTotal(course, tee.id, unit)} ${unitSuffix(unit)}`
+                        : 'No yardages yet'}
                       {ratings !== '' && ` · ${ratings}`}
                     </p>
                   </div>

@@ -1,4 +1,8 @@
-/** Mirrors the JSON contracts in internal/auth and internal/course. */
+/** Mirrors the JSON contracts in internal/auth, internal/course, and internal/club. */
+
+import type { DistanceUnit } from './lib/units'
+
+export type { DistanceUnit }
 
 export interface User {
   id: string
@@ -7,6 +11,11 @@ export interface User {
   email_verified: boolean
   has_password: boolean
   providers: string[]
+  /**
+   * Which unit this user reads and enters distances in. A display preference
+   * only — everything is stored in yards. See lib/units.ts.
+   */
+  distance_unit: DistanceUnit
   created_at: string
 }
 
@@ -130,6 +139,10 @@ export interface Club {
   shaft: string | null
   flex: string | null
   notes: string | null
+  /** Yards the player expects to fly this club. Always null for a putter. */
+  expected_carry: number | null
+  /** Yards of typical spread around that carry. Always null for a putter. */
+  average_dispersion: number | null
   status: ClubStatus
   retired_at: string | null
   display_order: number
@@ -169,6 +182,9 @@ export interface ClubPayload {
   shaft?: string | null
   flex?: string | null
   notes?: string | null
+  /** Rejected by the server on a putter — send null, not a number. */
+  expected_carry?: number | null
+  average_dispersion?: number | null
   display_order?: number
   /** Honored on create only; status changes go through setClubStatus. */
   status?: ClubStatus

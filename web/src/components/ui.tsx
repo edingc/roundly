@@ -59,10 +59,20 @@ interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
   label: string
   error?: string
   hint?: string
+  /**
+   * A unit rendered inside the input against its right edge, e.g. "yds".
+   *
+   * Decorative: it is hidden from assistive tech, because a screen reader
+   * would otherwise read it adrift from the value it belongs to. A field using
+   * one has to put the unit back into the accessible name itself, with an
+   * `aria-label` that still contains the visible label text ("Expected carry
+   * in yards"), or into its `hint`.
+   */
+  suffix?: string
 }
 
 /** A labelled input that wires up its own error and hint associations. */
-export function Field({ label, error, hint, id, className, ...rest }: FieldProps) {
+export function Field({ label, error, hint, suffix, id, className, ...rest }: FieldProps) {
   const inputId = id ?? `field-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   const errorId = `${inputId}-error`
   const hintId = `${inputId}-hint`
@@ -72,13 +82,25 @@ export function Field({ label, error, hint, id, className, ...rest }: FieldProps
       <label htmlFor={inputId} className="label">
         {label}
       </label>
-      <input
-        id={inputId}
-        className={cx('input', error && 'input-error', className)}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={cx(error && errorId, hint && hintId) || undefined}
-        {...rest}
-      />
+      <div className="relative">
+        <input
+          id={inputId}
+          className={cx('input', suffix && 'pr-12', error && 'input-error', className)}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={cx(error && errorId, hint && hintId) || undefined}
+          {...rest}
+        />
+        {suffix && (
+          <span
+            aria-hidden="true"
+            // pointer-events-none so a click on the unit still lands in the
+            // input underneath and puts the caret where the user aimed.
+            className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-slate-500 dark:text-slate-400"
+          >
+            {suffix}
+          </span>
+        )}
+      </div>
       {hint && !error && (
         <p id={hintId} className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
           {hint}

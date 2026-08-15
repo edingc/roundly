@@ -1,7 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import type { CourseDetail, Hole, Tee } from '../types'
 import { api } from '../lib/api'
+import { useDistanceUnit } from '../lib/auth'
 import { usePreferences } from '../lib/preferences'
+import {
+  boundFromYards,
+  fromYards,
+  toYards,
+  unitColumnLabel,
+  unitSuffix,
+  type DistanceUnit,
+} from '../lib/units'
 import { cx } from './ui'
 
 type CellStatus = 'idle' | 'saving' | 'saved' | 'error'
@@ -20,14 +29,21 @@ function isHalfFilled(draft: CellDraft): boolean {
   return (draft.par.trim() !== '') !== (draft.yardage.trim() !== '')
 }
 
-/** Builds the editable draft state from the server's course detail. */
-function buildDrafts(holes: Hole[]): Record<string, CellDraft> {
+/**
+ * Builds the editable draft state from the server's course detail.
+ *
+ * Drafts hold what the user sees, so yardages are converted out of the stored
+ * yards here and converted back in saveCell. Keeping the whole grid — drafts,
+ * server snapshot, and totals — in one unit is what lets the dirty check stay
+ * a plain string comparison.
+ */
+function buildDrafts(holes: Hole[], unit: DistanceUnit): Record<string, CellDraft> {
   const drafts: Record<string, CellDraft> = {}
   for (const hole of holes) {
     for (const detail of hole.tee_details) {
       drafts[cellKey(hole.id, detail.tee_id)] = {
         par: String(detail.par),
-        yardage: String(detail.yardage),
+        yardage: String(fromYards(detail.yardage, unit)),
       }
     }
   }
@@ -60,7 +76,10 @@ export function ScorecardGrid({
   onCourseChanged: () => void
 }) {
   const { strokeIndexLabel } = usePreferences()
-  const [drafts, setDrafts] = useState<Record<string, CellDraft>>(() => buildDrafts(course.holes))
+  const unit = useDistanceUnit()
+  const [drafts, setDrafts] = useState<Record<string, CellDraft>>(() =>
+    buildDrafts(course.holes, unit),
+  )
   const [handicaps, setHandicaps] = useState<Record<string, string>>(() =>
     buildHandicapDrafts(course.holes),
   )
@@ -73,7 +92,7 @@ export function ScorecardGrid({
   // already typed into another cell but not yet blurred — which silently lost
   // edits. Cells for holes or tees that no longer exist are dropped.
   useEffect(() => {
-    const serverDrafts = buildDrafts(course.holes)
+    const serverDrafts = buildDrafts(course.holes, unit)
     setDrafts((prev) => {
       const merged: Record<string, CellDraft> = {}
       for (const hole of course.holes) {
@@ -96,23 +115,22 @@ export function ScorecardGrid({
     })
   }, [course])
 
+  // Switching units re-seeds the grid from the server rather than merging.
+  // The effect above deliberately keeps local drafts over server values, which
+  // is right after a save but wrong here: a number half-typed in yards means
+  // something else entirely in metres, so those drafts have to go.
+  useEffect(() => {
+    setDrafts(buildDrafts(course.holes, unit))
+    // Keyed on the unit alone; `course` changes are the other effect's job.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unit])
+
   // Longest to shortest, so the scorecard reads like a real one (back tees
   // on the left working down to forward tees).
   const tees = [...course.tees].sort((a, b) => b.total_yardage - a.total_yardage)
   const holes = course.holes
 
-  const serverValues = useMemo(() => {
-    const values: Record<string, CellDraft> = {}
-    for (const hole of holes) {
-      for (const detail of hole.tee_details) {
-        values[cellKey(hole.id, detail.tee_id)] = {
-          par: String(detail.par),
-          yardage: String(detail.yardage),
-        }
-      }
-    }
-    return values
-  }, [holes])
+  const serverValues = useMemo(() => buildDrafts(holes, unit), [holes, unit])
 
   const setStatus = useCallback((key: string, status: CellStatus) => {
     setStatuses((prev) => ({ ...prev, [key]: status }))
@@ -143,7 +161,8 @@ export function ScorecardGrid({
       setStatus(key, 'saving')
       setErrorMessage(null)
       try {
-        await api.setTeeDetail(hole.id, tee.id, par, yardage)
+        // The grid works in the user's unit; the API stores yards.
+        await api.setTeeDetail(hole.id, tee.id, par, toYards(yardage, unit))
         setStatus(key, 'saved')
         onCourseChanged()
       } catch (error) {
@@ -154,7 +173,7 @@ export function ScorecardGrid({
         )
       }
     },
-    [drafts, serverValues, setStatus, onCourseChanged],
+    [drafts, serverValues, setStatus, onCourseChanged, unit],
   )
 
   const saveHandicap = useCallback(
@@ -296,8 +315,8 @@ export function ScorecardGrid({
                     <input
                       type="number"
                       inputMode="numeric"
-                      min={1}
-                      max={1000}
+                      min={boundFromYards(1, unit, 'min')}
+                      max={boundFromYards(1000, unit, 'max')}
                       value={draft.yardage}
                       disabled={!editable}
                       onChange={(e) => updateCell(hole.id, tee.id, { yardage: e.target.value })}
@@ -416,7 +435,7 @@ export function ScorecardGrid({
                     'bg-slate-50 px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-800/70 dark:text-slate-400',
                   )}
                 >
-                  Yds
+                  {unitColumnLabel(unit)}
                 </th>
               </Fragment>
             ))}
@@ -449,7 +468,10 @@ export function ScorecardGrid({
                   )}
                 >
                   <span className="font-bold">{par}</span>
-                  <span className="text-slate-600 dark:text-slate-300"> · {yardage} yds</span>
+                  <span className="text-slate-600 dark:text-slate-300">
+                    {' '}
+                    · {yardage} {unitSuffix(unit)}
+                  </span>
                 </td>
               )
             })}
@@ -489,6 +511,7 @@ export function ScorecardGrid({
           editable={editable}
           gridLine={gridLine}
           cellInputClass={cellInputClass}
+          unit={unit}
           statusClass={statusClass}
           totals={totals}
           updateCell={updateCell}
@@ -500,7 +523,7 @@ export function ScorecardGrid({
 
       {editable && (
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          A hole needs both par and yardage to save automatically.
+          A hole needs both par and distance to save automatically.
         </p>
       )}
     </div>
@@ -548,6 +571,7 @@ function HorizontalScorecard({
   editable,
   gridLine,
   cellInputClass,
+  unit,
   statusClass,
   totals,
   updateCell,
@@ -565,6 +589,7 @@ function HorizontalScorecard({
   editable: boolean
   gridLine: string
   cellInputClass: string
+  unit: DistanceUnit
   // `half` marks a cell whose row is partly filled in; the callers below pass
   // it, and the implementation has always accepted it.
   statusClass: (status: CellStatus, half?: boolean) => string
@@ -764,7 +789,7 @@ function HorizontalScorecard({
                     'sticky left-24 z-10 w-11 bg-white px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400',
                   )}
                 >
-                  Yds
+                  {unitColumnLabel(unit)}
                 </th>
                 {columns.map((col) => {
                   if (col.kind === 'hole') {
@@ -778,8 +803,8 @@ function HorizontalScorecard({
                         <input
                           type="number"
                           inputMode="numeric"
-                          min={1}
-                          max={1000}
+                          min={boundFromYards(1, unit, 'min')}
+                          max={boundFromYards(1000, unit, 'max')}
                           value={draft.yardage}
                           disabled={!editable}
                           onChange={(e) =>
