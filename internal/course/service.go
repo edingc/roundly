@@ -229,8 +229,8 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 
 		for n := 1; n <= holeCount; n++ {
 			if err := q.CreateHole(ctx, sqlc.CreateHoleParams{
-				ID:         id.New(),
-				CourseID:   courseID,
+				ID:            id.New(),
+				CourseID:      courseID,
 				HoleNumber:    int64(n),
 				HandicapIndex: nil,
 			}); err != nil {

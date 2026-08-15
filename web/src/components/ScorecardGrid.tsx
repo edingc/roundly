@@ -565,7 +565,9 @@ function HorizontalScorecard({
   editable: boolean
   gridLine: string
   cellInputClass: string
-  statusClass: (status: CellStatus) => string
+  // `half` marks a cell whose row is partly filled in; the callers below pass
+  // it, and the implementation has always accepted it.
+  statusClass: (status: CellStatus, half?: boolean) => string
   totals: (tee: Tee, subset: Hole[]) => { par: number; yardage: number }
   updateCell: (holeId: string, teeId: string, patch: Partial<CellDraft>) => void
   saveCell: (hole: Hole, tee: Tee) => Promise<void>
