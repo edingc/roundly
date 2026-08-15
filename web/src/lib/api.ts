@@ -10,6 +10,8 @@ import type {
   CourseExport,
   CoursePage,
   Hole,
+  ImportSummary,
+  ProfilePayload,
   Session,
   Tee,
   TeePayload,
@@ -98,6 +100,16 @@ interface RequestOptions {
   /** Skip the Authorization header and the retry-after-refresh behavior. */
   auth?: boolean
   signal?: AbortSignal
+  /**
+   * Send this instead of a JSON body, with no Content-Type of our own so the
+   * browser can set the multipart boundary. Used for the avatar upload.
+   */
+  formData?: FormData
+  /**
+   * Return the raw response body rather than parsed JSON. Used for the ZIP
+   * export, which is not JSON at all.
+   */
+  blob?: boolean
 }
 
 async function parseError(response: Response): Promise<ApiError> {
@@ -118,16 +130,24 @@ async function parseError(response: Response): Promise<ApiError> {
 }
 
 async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' }
+  const headers: Record<string, string> = {}
+  // A blob response is a file, not JSON, so it must not claim otherwise.
+  headers['Accept'] = options.blob ? '*/*' : 'application/json'
+  // Deliberately no Content-Type for FormData: the browser has to set it
+  // itself, because only it knows the multipart boundary it generated.
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   if (options.auth !== false && accessToken) {
     headers['Authorization'] = `Bearer ${accessToken}`
   }
 
+  let body: BodyInit | undefined
+  if (options.formData !== undefined) body = options.formData
+  else if (options.body !== undefined) body = JSON.stringify(options.body)
+
   const response = await fetch(`/api${path}`, {
     method: options.method ?? 'GET',
     headers,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body,
     // Cookies carry the OAuth state/PKCE values during the Google redirect.
     credentials: 'same-origin',
     signal: options.signal,
@@ -135,6 +155,7 @@ async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> 
 
   if (!response.ok) throw await parseError(response)
   if (response.status === 204) return undefined as T
+  if (options.blob) return (await response.blob()) as T
   return (await response.json()) as T
 }
 
@@ -370,6 +391,40 @@ export const api = {
       `/auth/link/google?mode=json&return_to=${encodeURIComponent(returnTo)}`,
       { method: 'POST' },
     ),
+
+  // ---- Profile ----
+
+  updateProfile: (payload: ProfilePayload) =>
+    request<User>('/account/profile', { method: 'PUT', body: payload }),
+
+  /**
+   * Changes the login address. Returns a whole new Session, not a User: the
+   * old access token carries the old address in its claims, and every other
+   * device is signed out on purpose.
+   */
+  changeEmail: (email: string, currentPassword: string) =>
+    request<Session>('/account/email', {
+      method: 'PUT',
+      body: { email, current_password: currentPassword },
+    }),
+
+  uploadAvatar: (file: File) => {
+    const form = new FormData()
+    form.append('avatar', file)
+    return request<User>('/account/avatar', { method: 'POST', formData: form })
+  },
+
+  deleteAvatar: () => request<User>('/account/avatar', { method: 'DELETE' }),
+
+  // ---- Data ----
+
+  exportAccount: () => request<unknown>('/account/export'),
+
+  exportAccountCsv: () => request<Blob>('/account/export?format=csv', { blob: true }),
+
+  importAccount: (payload: unknown) =>
+    request<ImportSummary>('/account/import', { method: 'POST', body: payload }),
+
 }
 
 /**

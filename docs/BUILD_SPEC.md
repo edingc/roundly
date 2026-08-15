@@ -223,6 +223,64 @@ either alone. So this is a whole-app preference, added here rather than deferred
 
 ---
 
+## 4b. USER PROFILE — account and data ✅
+
+Delivered as `internal/account` plus the `/profile` screen, which replaces the old settings
+page. `/settings` redirects so bookmarks survive. The manual pass is
+in [profile-test-checklist.md](profile-test-checklist.md).
+
+Not a numbered phase: it is the account surface Phase 3 needs before rounds start attaching
+themselves to people, done early because "download my data" gets much harder to add later.
+
+### Decisions made during implementation
+
+- **Settings became Profile, under the user's own menu.** An account-shaped thing belongs
+  beside the person's name, not in the app's section nav. The nav is left holding Courses and
+  Bag — the two things the app is actually *for*.
+- **Imperial/Metric is a relabelling, not a migration.** `users.distance_unit` still stores
+  `yards`/`meters` and the conversion code is untouched. The wording generalises if temperature
+  or weight ever arrive, and nothing had to be rewritten to get it.
+- **Avatars live in SQLite, in their own table.** The first plan was files in a data directory.
+  Once the image is downscaled to a 256×256 JPEG — 15–30 KB, well under the ~100 KB where the
+  filesystem starts to win — that stopped paying for itself: blob storage keeps the
+  single-binary-plus-one-file deployment promise, keeps `cp roundly.db` a complete backup, and
+  deletes the entire file/row consistency problem (write ordering, orphan cleanup, path
+  traversal, container permissions). Its own table because every user query is `SELECT *`, and
+  `toUser` runs on nearly every request.
+- **The avatar URL is an unguessable, rotating key,** served unauthenticated. An `<img>` cannot
+  send a bearer header and the access token is memory-only. Rotating on every upload is what
+  makes `immutable` caching correct and what makes a replaced photo unreachable from a shared
+  link. The URL is a bearer capability, and the UI says so.
+- **Uploads are sniffed, bounded, and re-encoded.** The multipart Content-Type is
+  attacker-controlled and never consulted; dimensions are checked from the header before pixels
+  are allocated; EXIF orientation is applied by hand because `image/jpeg` ignores it and every
+  phone photo would otherwise arrive sideways. The re-encode is what strips metadata — there is
+  no EXIF path through `jpeg.Encode` at all.
+- **Changing the email returns a new session and signs out everywhere else.** The access token
+  carries the old address in its claims, and moving the account to a new address is the first
+  thing someone holding a stolen token would do. Accounts with a password must type it;
+  password-less (Google-only) accounts must instead have signed in within the last five minutes,
+  because otherwise there would be no second factor at all.
+- **The export excludes credentials and identifiers**: password hash, refresh tokens, the
+  OAuth provider subject, the avatar key, and every row ID. It includes the avatar as base64, so a
+  restore is complete rather than quietly losing the photo.
+- **CSV is six files, not five.** Par and yardage live in `hole_tee_details`; a set without that
+  file loses every number on every scorecard. Cells starting `=`, `+`, `-`, or `@` are escaped,
+  because a club label is executable content in Excel otherwise.
+- **Import merges and skips, and never matches courses by ID.** The directory is shared, so an
+  ID match could rewrite a course another user created. Courses match on name among the
+  importer's own; clubs on type plus label. Nothing is overwritten or deleted, which makes a
+  double import a no-op and a partial failure recoverable by re-running it.
+- **The course export's `format_version` is finally checked** — it had shipped as 1, 2, and 3
+  without anything ever reading it. Versions 1–3 are accepted, since they differ only by
+  optional fields and those files are already in users' hands.
+
+### Known gaps
+
+- **Account deletion is not possible,** and the schema is not ready for it: `courses.created_by`
+  has no `ON DELETE CASCADE`, unlike every other reference to `users`. "Download my data" is
+  exactly what makes people ask for "delete my account" next.
+
 ## 5. How to Use This Doc
 
 When starting a session:

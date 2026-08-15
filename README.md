@@ -3,7 +3,8 @@
 Self-hosted golf scorekeeping and stat tracking. A single Go binary with the
 React frontend embedded, plus one SQLite file.
 
-**Phases 1 (auth + course directory) and 2 (golf bag) are complete.** See
+**Phases 1 (auth + course directory) and 2 (golf bag) are complete, plus the user
+profile: account details and data export and restore.** See
 [docs/BUILD_SPEC.md](docs/BUILD_SPEC.md) for the full roadmap.
 
 ## Quick start
@@ -85,6 +86,7 @@ on the detail page stay clickable either way.
 ```
 cmd/server/          entrypoint: config, database, HTTP server, signal handling
 internal/
+  account/           profile, avatars, whole-account export and merge import
   auth/              both login paths, sessions, argon2id, Google OIDC, middleware
   course/            course/tee/hole CRUD and the per-tee par & yardage mapping
   config/            environment configuration
@@ -139,6 +141,18 @@ All routes are under `/api`. Everything except the auth endpoints below requires
 | `POST` | `/auth/link/google` | Begin linking Google to this account *(auth)* |
 | `POST` | `/auth/password` | Set or change the password *(auth)* |
 | `PUT` | `/auth/preferences` | `{distance_unit}` — `yards` or `meters` *(auth)* |
+
+**Account** *(all require auth)*
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/me` | The signed-in user |
+| `PUT` | `/account/profile` | Names, home course, location |
+| `PUT` | `/account/email` | Change the login address; returns a new session |
+| `POST` `DELETE` | `/account/avatar` | Upload (multipart, field `avatar`) or clear the photo |
+| `GET` | `/avatars/{key}.jpg` | The image itself — unauthenticated, see below |
+| `GET` | `/account/export?format=json\|csv` | Download everything you own |
+| `POST` | `/account/import` | Merge a JSON backup back in |
 
 **Courses** *(all require auth)*
 
@@ -229,6 +243,43 @@ Distances) is a display preference applied at the input and display boundary by
 `web/src/lib/units.ts`. Switching it rewrites nothing, so switching back shows
 the original numbers. Course export stays in yards so a shared course file does
 not depend on who exported it.
+
+### The profile, avatars, and data export
+
+**Avatars are stored in SQLite, in their own table.** A 256×256 JPEG is 15–30 KB, well under
+the size where the filesystem starts to beat SQLite, so keeping it in the database preserves
+the single-binary-plus-one-file deployment story — `cp roundly.db` is still a complete backup
+— and removes every file/row consistency problem at once. The bytes live in `user_avatars`
+rather than on `users` because every user query is `SELECT *`, and dragging 25 KB through each
+session check would be a real cost.
+
+Uploads are sniffed with `http.DetectContentType` rather than trusted from the multipart
+header, rejected on their decoded dimensions *before* any pixels are allocated, corrected for
+EXIF orientation (`image/jpeg` ignores the tag, so phone photos arrive sideways), centre-cropped,
+downscaled, and re-encoded. The re-encode is what strips metadata: `jpeg.Encode` writes from
+decoded pixels and has no path for EXIF at all, so GPS coordinates and camera serials cannot
+survive an upload.
+
+The image is served unauthenticated at `/api/avatars/{key}.jpg`, because an `<img>` tag cannot
+send a bearer header and this SPA keeps its access token in memory only. The 22-character key
+is unguessable and rotates on every upload, which is what makes `Cache-Control: immutable`
+correct — the bytes at a URL genuinely never change, and replacing a photo invalidates every
+cache by changing the address. The URL is a bearer capability: anyone holding it can view that
+image until it is replaced, the same trade-off Gravatar makes.
+
+**Export and import.** `GET /account/export` returns profile, clubs, and every course you
+created, with the avatar base64-embedded so a restore is actually complete. It excludes the
+password hash, refresh tokens, and the OAuth provider subject. The CSV option is a ZIP
+of six tables — the sixth, `hole_tee_details.csv`, is where par and yardage live, and a set
+without it would silently lose every number on every scorecard. Cells beginning `=`, `+`, `-`,
+or `@` are prefixed with an apostrophe, because a club labelled `=HYPERLINK(…)` is executable
+content the moment the file opens in Excel.
+
+Import merges and skips: clubs match on type plus label, courses on name among *your own*
+courses. Matching courses by the ID in the file — which the single-course import does — would
+let a restore rewrite a course somebody else created, since the directory is shared. Nothing is
+overwritten and nothing is deleted, so importing the same file twice is a no-op and a partial
+failure is fixed by running it again.
 
 ## Testing
 

@@ -4,6 +4,19 @@
 
 package sqlc
 
+type ApiKey struct {
+	ID         string
+	UserID     string
+	Name       string
+	KeyHash    string
+	KeyPrefix  string
+	Scope      string
+	CreatedAt  string
+	LastUsedAt *string
+	ExpiresAt  *string
+	RevokedAt  *string
+}
+
 type Club struct {
 	ID                string
 	UserID            string
@@ -95,11 +108,27 @@ type Tee struct {
 }
 
 type User struct {
-	ID            string
-	Email         string
-	PasswordHash  *string
-	DisplayName   string
-	EmailVerified int64
-	CreatedAt     string
-	DistanceUnit  string
+	ID              string
+	Email           string
+	PasswordHash    *string
+	DisplayName     string
+	EmailVerified   int64
+	CreatedAt       string
+	DistanceUnit    string
+	FirstName       *string
+	LastName        *string
+	AvatarKey       *string
+	HomeCourseID    *string
+	LocationCity    *string
+	LocationRegion  *string
+	LocationCountry *string
+	UpdatedAt       string
+}
+
+type UserAvatar struct {
+	UserID      string
+	Image       []byte
+	ContentType string
+	ByteSize    int64
+	UpdatedAt   string
 }

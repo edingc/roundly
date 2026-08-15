@@ -155,6 +155,51 @@ func (q *Queries) ListCourses(ctx context.Context, arg ListCoursesParams) ([]Cou
 	return items, nil
 }
 
+const listCoursesByCreator = `-- name: ListCoursesByCreator :many
+SELECT id, name, address, created_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
+WHERE created_by = ?
+ORDER BY name COLLATE NOCASE ASC
+`
+
+// Every course this user created, for the account export. Backed by
+// idx_courses_created_by.
+func (q *Queries) ListCoursesByCreator(ctx context.Context, createdBy string) ([]Course, error) {
+	rows, err := q.db.QueryContext(ctx, listCoursesByCreator, createdBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Course{}
+	for rows.Next() {
+		var i Course
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Address,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Phone,
+			&i.Website,
+			&i.Notes,
+			&i.FacilityType,
+			&i.Latitude,
+			&i.Longitude,
+			&i.Pinned,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const searchCourses = `-- name: SearchCourses :many
 SELECT id, name, address, created_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
 WHERE instr(lower(name), ?1) > 0

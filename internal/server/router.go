@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/edingc/roundly/internal/account"
 	"github.com/edingc/roundly/internal/auth"
 	"github.com/edingc/roundly/internal/club"
 	"github.com/edingc/roundly/internal/config"
@@ -25,8 +26,10 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler) http.Handle
 
 	authService := auth.NewService(db, tokenIssuer, googleProvider)
 	authHandler := auth.NewHandler(authService, googleProvider, cfg.PublicURL, cfg.IsProd())
-	courseHandler := course.NewHandler(course.NewService(db))
+	courseService := course.NewService(db)
+	courseHandler := course.NewHandler(courseService)
 	clubHandler := club.NewHandler(club.NewService(db))
+	accountHandler := account.NewHandler(account.NewService(db, authService, courseService))
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -39,12 +42,18 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler) http.Handle
 		api.Get("/health", health)
 		api.Mount("/auth", authHandler.Routes())
 
-		// The course directory and the golf bag are entirely behind
-		// authentication.
+		// Avatars are served unauthenticated: an <img> tag cannot carry a
+		// bearer token, and the SPA holds its access token in memory only. The
+		// unguessable key in the path is what protects the image.
+		api.Get("/avatars/{name}", accountHandler.ServeAvatar)
+
+		// The course directory, the golf bag, and the account are entirely
+		// behind authentication.
 		api.Group(func(protected chi.Router) {
 			protected.Use(authService.Middleware)
 			courseHandler.Register(protected)
 			clubHandler.Register(protected)
+			accountHandler.Register(protected)
 		})
 
 		// Any unmatched /api path is a client error, not a request for the SPA.

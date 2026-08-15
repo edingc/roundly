@@ -186,6 +186,47 @@ export function ConfirmDialog({
   )
 }
 
+/**
+ * A row of mutually exclusive options.
+ *
+ * Extracted from the three hand-rolled copies the settings page used to carry,
+ * so theme, units, and the scorecard label cannot drift apart visually.
+ */
+export function SegmentedControl<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string
+  value: T
+  options: Array<{ value: T; label: string }>
+  onChange: (value: T) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex gap-2" role="radiogroup" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={value === option.value}
+          disabled={disabled}
+          onClick={() => onChange(option.value)}
+          className={cx(
+            'flex-1',
+            value === option.value ? 'btn bg-brand-600 text-white' : 'btn-secondary',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 /** An empty-state block for lists with nothing in them. */
 export function EmptyState({
   title,

@@ -31,6 +31,11 @@ func NewService(db *database.DB, tokens *TokenIssuer, google *GoogleProvider) *S
 }
 
 // User is the API representation of an account.
+//
+// This is the only user DTO. The profile endpoints in internal/account return
+// it too rather than defining their own: the SPA hydrates its whole notion of
+// the signed-in person from here, and a parallel shape would drift from this
+// one within a release.
 type User struct {
 	ID            string   `json:"id"`
 	Email         string   `json:"email"`
@@ -41,7 +46,24 @@ type User struct {
 	// DistanceUnit is a display preference: every distance in the database is
 	// stored in yards, and the client converts on the way in and out.
 	DistanceUnit string `json:"distance_unit"`
-	CreatedAt    string `json:"created_at"`
+
+	// The profile fields below are all optional. A player who wants to be
+	// nothing but a display name should never be made to fill one in.
+	FirstName *string `json:"first_name"`
+	LastName  *string `json:"last_name"`
+	// AvatarURL is a relative path so it works through the Vite dev proxy and
+	// same-origin in production without configuration. Nil when unset.
+	AvatarURL    *string `json:"avatar_url"`
+	HomeCourseID *string `json:"home_course_id"`
+	// HomeCourseName is resolved for display so the client does not have to
+	// fetch the course just to render its name.
+	HomeCourseName  *string `json:"home_course_name"`
+	LocationCity    *string `json:"location_city"`
+	LocationRegion  *string `json:"location_region"`
+	LocationCountry *string `json:"location_country"`
+
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // Distance units the app understands.
@@ -79,16 +101,49 @@ func (s *Service) toUser(ctx context.Context, row sqlc.User) (*User, error) {
 		unit = UnitYards
 	}
 
+	// Resolved only when a home course is actually set, so the common case
+	// stays at the one query this function has always cost.
+	var homeCourseName *string
+	if row.HomeCourseID != nil && *row.HomeCourseID != "" {
+		if courseRow, err := s.db.Queries.GetCourse(ctx, *row.HomeCourseID); err == nil {
+			name := courseRow.Name
+			homeCourseName = &name
+		}
+		// A missing course is not an error worth failing a session check over.
+		// The FK is ON DELETE SET NULL, so this only happens in the window
+		// between a delete and the next read.
+	}
+
 	return &User{
-		ID:            row.ID,
-		Email:         row.Email,
-		DisplayName:   row.DisplayName,
-		EmailVerified: row.EmailVerified != 0,
-		HasPassword:   row.PasswordHash != nil && *row.PasswordHash != "",
-		Providers:     providers,
-		DistanceUnit:  unit,
-		CreatedAt:     row.CreatedAt,
+		ID:              row.ID,
+		Email:           row.Email,
+		DisplayName:     row.DisplayName,
+		EmailVerified:   row.EmailVerified != 0,
+		HasPassword:     row.PasswordHash != nil && *row.PasswordHash != "",
+		Providers:       providers,
+		DistanceUnit:    unit,
+		FirstName:       row.FirstName,
+		LastName:        row.LastName,
+		AvatarURL:       AvatarURL(row.AvatarKey),
+		HomeCourseID:    row.HomeCourseID,
+		HomeCourseName:  homeCourseName,
+		LocationCity:    row.LocationCity,
+		LocationRegion:  row.LocationRegion,
+		LocationCountry: row.LocationCountry,
+		CreatedAt:       row.CreatedAt,
+		UpdatedAt:       row.UpdatedAt,
 	}, nil
+}
+
+// AvatarURL builds the public path for an avatar key, or nil when the user has
+// no avatar. The key is unguessable and rotates on every upload, which is what
+// lets the served image be cached indefinitely.
+func AvatarURL(key *string) *string {
+	if key == nil || *key == "" {
+		return nil
+	}
+	url := "/api/avatars/" + *key + ".jpg"
+	return &url
 }
 
 // SetDistanceUnit changes the unit the caller reads and enters distances in.
@@ -102,6 +157,7 @@ func (s *Service) SetDistanceUnit(ctx context.Context, userID, unit string) (*Us
 
 	if err := s.db.Queries.UpdateUserDistanceUnit(ctx, sqlc.UpdateUserDistanceUnitParams{
 		DistanceUnit: unit,
+		UpdatedAt:    timex.Now(),
 		ID:           userID,
 	}); err != nil {
 		return nil, httpx.Internal(fmt.Errorf("update distance unit: %w", err))
@@ -132,13 +188,15 @@ func (s *Service) SignUp(ctx context.Context, email, password, displayName strin
 		return nil, httpx.Internal(err)
 	}
 
+	now := timex.Now()
 	row := sqlc.CreateUserParams{
 		ID:            id.New(),
 		Email:         email,
 		PasswordHash:  &hash,
 		DisplayName:   displayName,
 		EmailVerified: 0,
-		CreatedAt:     timex.Now(),
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 	if err := s.db.Queries.CreateUser(ctx, row); err != nil {
 		if isUniqueViolation(err) {
@@ -374,6 +432,7 @@ func (s *Service) createUserFromGoogle(ctx context.Context, email string, identi
 			DisplayName:   displayName,
 			EmailVerified: verified,
 			CreatedAt:     now,
+			UpdatedAt:     now,
 		}); err != nil {
 			return fmt.Errorf("create user: %w", err)
 		}
@@ -465,6 +524,7 @@ func (s *Service) SetPassword(ctx context.Context, userID, currentPassword, newP
 	}
 	if err := s.db.Queries.SetUserPasswordHash(ctx, sqlc.SetUserPasswordHashParams{
 		PasswordHash: &hash,
+		UpdatedAt:    timex.Now(),
 		ID:           userID,
 	}); err != nil {
 		return httpx.Internal(fmt.Errorf("set password hash: %w", err))
@@ -523,6 +583,41 @@ func (s *Service) revokeAllForUser(ctx context.Context, userID string) error {
 func (s *Service) PurgeExpiredTokens(ctx context.Context) error {
 	return s.db.Queries.DeleteExpiredRefreshTokens(ctx, timex.Now())
 }
+
+// RevokeAllSessions signs a user out everywhere. Exported for the account
+// package, which has to do this when an email address changes: the address is
+// the login identity, and changing it is exactly what someone holding a stolen
+// token would do first.
+func (s *Service) RevokeAllSessions(ctx context.Context, userID string) error {
+	if err := s.revokeAllForUser(ctx, userID); err != nil {
+		return httpx.Internal(err)
+	}
+	return nil
+}
+
+// IssueSessionFor mints a fresh session for an already-authenticated user.
+//
+// Exported so that an endpoint which invalidates the current access token — by
+// changing the email in its claims — can hand back a working replacement in the
+// same response, rather than leaving the client to discover it is signed out.
+func (s *Service) IssueSessionFor(ctx context.Context, userID string) (*Session, error) {
+	row, err := s.db.Queries.GetUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, httpx.Unauthorized("Your session has expired. Please sign in again.")
+		}
+		return nil, httpx.Internal(fmt.Errorf("load user: %w", err))
+	}
+	return s.issueSession(ctx, row)
+}
+
+// IsUniqueViolation reports whether err is a UNIQUE constraint failure.
+//
+// Exported for internal/account, which races the same email-uniqueness check
+// that SignUp does. Detecting it from the driver's error string is the one
+// SQLite-specific behaviour in the codebase; keeping it in this one function is
+// what makes the Phase 8 Postgres migration a single edit.
+func IsUniqueViolation(err error) bool { return isUniqueViolation(err) }
 
 func errInvalidCredentials() error {
 	return httpx.Unauthorized("That email and password combination is not correct.")

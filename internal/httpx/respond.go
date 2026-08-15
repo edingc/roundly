@@ -70,6 +70,13 @@ func Conflict(message string) *APIError {
 	return newAPIError(http.StatusConflict, "conflict", message)
 }
 
+// TooManyRequests reports that a caller has exceeded its rate limit. Callers
+// are expected to set Retry-After alongside it, since the status alone does not
+// tell the client when to come back.
+func TooManyRequests(message string) *APIError {
+	return newAPIError(http.StatusTooManyRequests, "rate_limited", message)
+}
+
 func Internal(err error) *APIError {
 	return (&APIError{
 		Status:  http.StatusInternalServerError,
@@ -139,13 +146,20 @@ const maxBodyBytes = 1 << 20 // 1 MiB
 // Decode reads a JSON body into dst, rejecting unknown fields so typos in
 // client payloads surface loudly instead of being silently dropped.
 func Decode(w http.ResponseWriter, r *http.Request, dst any) error {
+	return DecodeLimit(w, r, dst, maxBodyBytes)
+}
+
+// DecodeLimit is Decode with a caller-chosen size cap, for the endpoints whose
+// legitimate payload is larger than a single course — an account restore
+// carries every course and club the user owns.
+func DecodeLimit(w http.ResponseWriter, r *http.Request, dst any, maxBytes int64) error {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		if mediaType := strings.TrimSpace(strings.Split(ct, ";")[0]); mediaType != "application/json" {
 			return BadRequest("Content-Type must be application/json.")
 		}
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 

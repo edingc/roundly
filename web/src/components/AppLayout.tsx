@@ -1,7 +1,6 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
-import { useAuth } from '../lib/auth'
+import { NavLink, Outlet } from 'react-router-dom'
 import { useTheme } from '../lib/theme'
+import { UserMenu } from './UserMenu'
 import { FlagIcon, MoonIcon, SunIcon, cx } from './ui'
 
 function ThemeToggle() {
@@ -21,16 +20,6 @@ function ThemeToggle() {
 
 /** The signed-in chrome: header, nav, and the routed page body. */
 export function AppLayout() {
-  const { user, logOut } = useAuth()
-  const navigate = useNavigate()
-  const [signingOut, setSigningOut] = useState(false)
-
-  async function handleSignOut() {
-    setSigningOut(true)
-    await logOut()
-    navigate('/login', { replace: true })
-  }
-
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     cx(
       'rounded-lg px-3 py-2 text-sm font-medium transition-colors',
@@ -57,25 +46,13 @@ export function AppLayout() {
             <NavLink to="/bag" className={navLinkClass}>
               Bag
             </NavLink>
-            <NavLink to="/settings" className={navLinkClass}>
-              Settings
-            </NavLink>
           </nav>
 
+          {/* Settings moved under the user's own menu, where an account-shaped
+              thing belongs, so the nav is left holding only the app's sections. */}
           <div className="ml-auto flex items-center gap-1">
             <ThemeToggle />
-            {/* The name is redundant on a phone, where the space matters more. */}
-            <span className="hidden text-sm text-slate-500 sm:inline dark:text-slate-400">
-              {user?.display_name}
-            </span>
-            <button
-              type="button"
-              onClick={handleSignOut}
-              disabled={signingOut}
-              className="btn-ghost !min-h-0 !px-2.5 !py-2"
-            >
-              {signingOut ? 'Signing out…' : 'Sign out'}
-            </button>
+            <UserMenu />
           </div>
         </div>
       </header>

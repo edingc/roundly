@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/edingc/roundly/internal/httpx"
 )
@@ -19,6 +20,15 @@ const (
 // identity on the request context.
 func (s *Service) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// An API key has already been authenticated and policy-checked by the
+		// global guard, which is the only thing that can put a principal here.
+		// Without this, every key-authenticated request would fail the JWT
+		// parse below and a read-only key could never reach anything.
+		if _, ok := PrincipalFrom(r.Context()); ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		raw, err := bearerToken(r)
 		if err != nil {
 			httpx.Error(w, r, err)
@@ -31,8 +41,16 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), userIDKey, claims.Subject)
-		ctx = context.WithValue(ctx, emailKey, claims.Email)
+		var issuedAt time.Time
+		if claims.IssuedAt != nil {
+			issuedAt = claims.IssuedAt.Time
+		}
+		ctx := ContextWithPrincipal(r.Context(), Principal{
+			Kind:     PrincipalUser,
+			UserID:   claims.Subject,
+			Email:    claims.Email,
+			IssuedAt: issuedAt,
+		})
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

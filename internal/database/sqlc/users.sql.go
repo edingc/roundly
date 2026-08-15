@@ -10,8 +10,8 @@ import (
 )
 
 const createUser = `-- name: CreateUser :exec
-INSERT INTO users (id, email, password_hash, display_name, email_verified, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO users (id, email, password_hash, display_name, email_verified, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateUserParams struct {
@@ -21,6 +21,7 @@ type CreateUserParams struct {
 	DisplayName   string
 	EmailVerified int64
 	CreatedAt     string
+	UpdatedAt     string
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
@@ -31,12 +32,61 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 		arg.DisplayName,
 		arg.EmailVerified,
 		arg.CreatedAt,
+		arg.UpdatedAt,
 	)
 	return err
 }
 
+const deleteUserAvatar = `-- name: DeleteUserAvatar :exec
+DELETE FROM user_avatars WHERE user_id = ?
+`
+
+func (q *Queries) DeleteUserAvatar(ctx context.Context, userID string) error {
+	_, err := q.db.ExecContext(ctx, deleteUserAvatar, userID)
+	return err
+}
+
+const getAvatarByKey = `-- name: GetAvatarByKey :one
+SELECT a.image, a.content_type, a.updated_at
+FROM user_avatars a
+JOIN users u ON u.id = a.user_id
+WHERE u.avatar_key = ?
+`
+
+type GetAvatarByKeyRow struct {
+	Image       []byte
+	ContentType string
+	UpdatedAt   string
+}
+
+// The whole avatar serve path, in one indexed lookup. Joined rather than keyed
+// directly on the image row so that the unguessable key stays in one place.
+func (q *Queries) GetAvatarByKey(ctx context.Context, avatarKey *string) (GetAvatarByKeyRow, error) {
+	row := q.db.QueryRowContext(ctx, getAvatarByKey, avatarKey)
+	var i GetAvatarByKeyRow
+	err := row.Scan(&i.Image, &i.ContentType, &i.UpdatedAt)
+	return i, err
+}
+
+const getAvatarByUser = `-- name: GetAvatarByUser :one
+SELECT user_id, image, content_type, byte_size, updated_at FROM user_avatars WHERE user_id = ?
+`
+
+func (q *Queries) GetAvatarByUser(ctx context.Context, userID string) (UserAvatar, error) {
+	row := q.db.QueryRowContext(ctx, getAvatarByUser, userID)
+	var i UserAvatar
+	err := row.Scan(
+		&i.UserID,
+		&i.Image,
+		&i.ContentType,
+		&i.ByteSize,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, email_verified, created_at, distance_unit FROM users WHERE email = ?
+SELECT id, email, password_hash, display_name, email_verified, created_at, distance_unit, first_name, last_name, avatar_key, home_course_id, location_city, location_region, location_country, updated_at FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -50,12 +100,20 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.EmailVerified,
 		&i.CreatedAt,
 		&i.DistanceUnit,
+		&i.FirstName,
+		&i.LastName,
+		&i.AvatarKey,
+		&i.HomeCourseID,
+		&i.LocationCity,
+		&i.LocationRegion,
+		&i.LocationCountry,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, email_verified, created_at, distance_unit FROM users WHERE id = ?
+SELECT id, email, password_hash, display_name, email_verified, created_at, distance_unit, first_name, last_name, avatar_key, home_course_id, location_city, location_region, location_country, updated_at FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -69,62 +127,176 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.EmailVerified,
 		&i.CreatedAt,
 		&i.DistanceUnit,
+		&i.FirstName,
+		&i.LastName,
+		&i.AvatarKey,
+		&i.HomeCourseID,
+		&i.LocationCity,
+		&i.LocationRegion,
+		&i.LocationCountry,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
+const setUserAvatarKey = `-- name: SetUserAvatarKey :exec
+UPDATE users SET avatar_key = ?, updated_at = ? WHERE id = ?
+`
+
+type SetUserAvatarKeyParams struct {
+	AvatarKey *string
+	UpdatedAt string
+	ID        string
+}
+
+func (q *Queries) SetUserAvatarKey(ctx context.Context, arg SetUserAvatarKeyParams) error {
+	_, err := q.db.ExecContext(ctx, setUserAvatarKey, arg.AvatarKey, arg.UpdatedAt, arg.ID)
+	return err
+}
+
 const setUserEmailVerified = `-- name: SetUserEmailVerified :exec
-UPDATE users SET email_verified = ? WHERE id = ?
+UPDATE users SET email_verified = ?, updated_at = ? WHERE id = ?
 `
 
 type SetUserEmailVerifiedParams struct {
 	EmailVerified int64
+	UpdatedAt     string
 	ID            string
 }
 
 func (q *Queries) SetUserEmailVerified(ctx context.Context, arg SetUserEmailVerifiedParams) error {
-	_, err := q.db.ExecContext(ctx, setUserEmailVerified, arg.EmailVerified, arg.ID)
+	_, err := q.db.ExecContext(ctx, setUserEmailVerified, arg.EmailVerified, arg.UpdatedAt, arg.ID)
 	return err
 }
 
 const setUserPasswordHash = `-- name: SetUserPasswordHash :exec
-UPDATE users SET password_hash = ? WHERE id = ?
+UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?
 `
 
 type SetUserPasswordHashParams struct {
 	PasswordHash *string
+	UpdatedAt    string
 	ID           string
 }
 
 func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error {
-	_, err := q.db.ExecContext(ctx, setUserPasswordHash, arg.PasswordHash, arg.ID)
+	_, err := q.db.ExecContext(ctx, setUserPasswordHash, arg.PasswordHash, arg.UpdatedAt, arg.ID)
 	return err
 }
 
 const updateUserDisplayName = `-- name: UpdateUserDisplayName :exec
-UPDATE users SET display_name = ? WHERE id = ?
+UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?
 `
 
 type UpdateUserDisplayNameParams struct {
 	DisplayName string
+	UpdatedAt   string
 	ID          string
 }
 
 func (q *Queries) UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) error {
-	_, err := q.db.ExecContext(ctx, updateUserDisplayName, arg.DisplayName, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateUserDisplayName, arg.DisplayName, arg.UpdatedAt, arg.ID)
 	return err
 }
 
 const updateUserDistanceUnit = `-- name: UpdateUserDistanceUnit :exec
-UPDATE users SET distance_unit = ? WHERE id = ?
+UPDATE users SET distance_unit = ?, updated_at = ? WHERE id = ?
 `
 
 type UpdateUserDistanceUnitParams struct {
 	DistanceUnit string
+	UpdatedAt    string
 	ID           string
 }
 
 func (q *Queries) UpdateUserDistanceUnit(ctx context.Context, arg UpdateUserDistanceUnitParams) error {
-	_, err := q.db.ExecContext(ctx, updateUserDistanceUnit, arg.DistanceUnit, arg.ID)
+	_, err := q.db.ExecContext(ctx, updateUserDistanceUnit, arg.DistanceUnit, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const updateUserEmail = `-- name: UpdateUserEmail :exec
+UPDATE users SET email = ?, email_verified = 0, updated_at = ? WHERE id = ?
+`
+
+type UpdateUserEmailParams struct {
+	Email     string
+	UpdatedAt string
+	ID        string
+}
+
+// Changing an address always drops verification: the new one has not been
+// proven, and carrying the old flag over would mark an unproven address
+// verified.
+func (q *Queries) UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserEmail, arg.Email, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const updateUserProfile = `-- name: UpdateUserProfile :exec
+UPDATE users
+SET first_name = ?,
+    last_name = ?,
+    display_name = ?,
+    home_course_id = ?,
+    location_city = ?,
+    location_region = ?,
+    location_country = ?,
+    updated_at = ?
+WHERE id = ?
+`
+
+type UpdateUserProfileParams struct {
+	FirstName       *string
+	LastName        *string
+	DisplayName     string
+	HomeCourseID    *string
+	LocationCity    *string
+	LocationRegion  *string
+	LocationCountry *string
+	UpdatedAt       string
+	ID              string
+}
+
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserProfile,
+		arg.FirstName,
+		arg.LastName,
+		arg.DisplayName,
+		arg.HomeCourseID,
+		arg.LocationCity,
+		arg.LocationRegion,
+		arg.LocationCountry,
+		arg.UpdatedAt,
+		arg.ID,
+	)
+	return err
+}
+
+const upsertUserAvatar = `-- name: UpsertUserAvatar :exec
+INSERT INTO user_avatars (user_id, image, content_type, byte_size, updated_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(user_id) DO UPDATE SET
+    image = excluded.image,
+    content_type = excluded.content_type,
+    byte_size = excluded.byte_size,
+    updated_at = excluded.updated_at
+`
+
+type UpsertUserAvatarParams struct {
+	UserID      string
+	Image       []byte
+	ContentType string
+	ByteSize    int64
+	UpdatedAt   string
+}
+
+func (q *Queries) UpsertUserAvatar(ctx context.Context, arg UpsertUserAvatarParams) error {
+	_, err := q.db.ExecContext(ctx, upsertUserAvatar,
+		arg.UserID,
+		arg.Image,
+		arg.ContentType,
+		arg.ByteSize,
+		arg.UpdatedAt,
+	)
 	return err
 }

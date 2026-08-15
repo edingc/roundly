@@ -47,6 +47,28 @@ func (v *Validator) MaxLen(field, value string, max int) {
 	}
 }
 
+// SingleLine trims the value and strips the control characters that would
+// break a line-oriented format, returning the cleaned string.
+//
+// This is not cosmetic. These values are written into the CSV account export,
+// where an embedded newline ends the record early and silently shifts every
+// following column — a corrupted file rather than a rejected one.
+func (v *Validator) SingleLine(field, value string) string {
+	cleaned := strings.Map(func(r rune) rune {
+		switch r {
+		case '\r', '\n', '\t':
+			return ' '
+		}
+		// Drop the remaining C0 controls outright; they have no legitimate
+		// place in a name or a city and can hide the rest of a line.
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	return strings.TrimSpace(cleaned)
+}
+
 // IntBetween bounds an integer inclusively.
 func (v *Validator) IntBetween(field string, value, min, max int) {
 	if value < min || value > max {

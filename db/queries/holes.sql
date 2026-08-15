@@ -39,3 +39,17 @@ DELETE FROM hole_tee_details WHERE hole_id = ? AND tee_id = ?;
 
 -- name: SumTeeYardage :one
 SELECT CAST(IFNULL(SUM(yardage), 0) AS INTEGER) AS total FROM hole_tee_details WHERE tee_id = ?;
+
+-- Creator-scoped bulk reads for the account export. See ListTeesByCreator.
+-- name: ListHolesByCreator :many
+SELECT h.* FROM holes h
+JOIN courses c ON c.id = h.course_id
+WHERE c.created_by = ?
+ORDER BY h.course_id ASC, h.hole_number ASC;
+
+-- name: ListHoleTeeDetailsByCreator :many
+SELECT d.* FROM hole_tee_details d
+JOIN holes h ON h.id = d.hole_id
+JOIN courses c ON c.id = h.course_id
+WHERE c.created_by = ?
+ORDER BY h.course_id ASC, h.hole_number ASC;

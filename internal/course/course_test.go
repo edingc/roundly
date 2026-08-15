@@ -30,11 +30,13 @@ func createUser(t *testing.T, db *database.DB, email string) string {
 	t.Helper()
 
 	userID := id.New()
+	now := timex.Now()
 	err := db.Queries.CreateUser(context.Background(), sqlc.CreateUserParams{
 		ID:          userID,
 		Email:       email,
 		DisplayName: email,
-		CreatedAt:   timex.Now(),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 	if err != nil {
 		t.Fatalf("create user: %v", err)

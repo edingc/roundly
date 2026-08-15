@@ -37,3 +37,10 @@ UPDATE courses SET updated_at = ? WHERE id = ?;
 
 -- name: DeleteCourse :exec
 DELETE FROM courses WHERE id = ?;
+
+-- Every course this user created, for the account export. Backed by
+-- idx_courses_created_by.
+-- name: ListCoursesByCreator :many
+SELECT * FROM courses
+WHERE created_by = ?
+ORDER BY name COLLATE NOCASE ASC;

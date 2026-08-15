@@ -31,3 +31,13 @@ SELECT * FROM tees WHERE course_id = ? AND name = ?;
 
 -- name: MaxTeeDisplayOrder :one
 SELECT CAST(IFNULL(MAX(display_order), -1) AS INTEGER) AS max_order FROM tees WHERE course_id = ?;
+
+-- Creator-scoped bulk read for the account export. Reading per course instead
+-- would cost three queries each, which on a single-connection pool turns a
+-- sixty-course export into a hundred and eighty sequential round trips.
+-- Ordering by course_id first lets the caller group in one pass.
+-- name: ListTeesByCreator :many
+SELECT t.* FROM tees t
+JOIN courses c ON c.id = t.course_id
+WHERE c.created_by = ?
+ORDER BY t.course_id ASC, t.display_order ASC, t.name COLLATE NOCASE ASC;

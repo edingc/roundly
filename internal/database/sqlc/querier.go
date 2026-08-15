@@ -26,6 +26,11 @@ type Querier interface {
 	DeleteHoleTeeDetail(ctx context.Context, arg DeleteHoleTeeDetailParams) error
 	DeleteOAuthAccount(ctx context.Context, arg DeleteOAuthAccountParams) error
 	DeleteTee(ctx context.Context, id string) error
+	DeleteUserAvatar(ctx context.Context, userID string) error
+	// The whole avatar serve path, in one indexed lookup. Joined rather than keyed
+	// directly on the image row so that the unguessable key stays in one place.
+	GetAvatarByKey(ctx context.Context, avatarKey *string) (GetAvatarByKeyRow, error)
+	GetAvatarByUser(ctx context.Context, userID string) (UserAvatar, error)
 	GetClub(ctx context.Context, id string) (Club, error)
 	GetCourse(ctx context.Context, id string) (Course, error)
 	GetHole(ctx context.Context, id string) (Hole, error)
@@ -39,11 +44,22 @@ type Querier interface {
 	GetUserByID(ctx context.Context, id string) (User, error)
 	ListClubsByUser(ctx context.Context, userID string) ([]Club, error)
 	ListCourses(ctx context.Context, arg ListCoursesParams) ([]Course, error)
+	// Every course this user created, for the account export. Backed by
+	// idx_courses_created_by.
+	ListCoursesByCreator(ctx context.Context, createdBy string) ([]Course, error)
 	ListHoleTeeDetailsByCourse(ctx context.Context, courseID string) ([]HoleTeeDetail, error)
+	ListHoleTeeDetailsByCreator(ctx context.Context, createdBy string) ([]HoleTeeDetail, error)
 	ListHoleTeeDetailsByHole(ctx context.Context, holeID string) ([]HoleTeeDetail, error)
 	ListHolesByCourse(ctx context.Context, courseID string) ([]Hole, error)
+	// Creator-scoped bulk reads for the account export. See ListTeesByCreator.
+	ListHolesByCreator(ctx context.Context, createdBy string) ([]Hole, error)
 	ListOAuthAccountsByUser(ctx context.Context, userID string) ([]OauthAccount, error)
 	ListTeesByCourse(ctx context.Context, courseID string) ([]Tee, error)
+	// Creator-scoped bulk read for the account export. Reading per course instead
+	// would cost three queries each, which on a single-connection pool turns a
+	// sixty-course export into a hundred and eighty sequential round trips.
+	// Ordering by course_id first lets the caller group in one pass.
+	ListTeesByCreator(ctx context.Context, createdBy string) ([]Tee, error)
 	MaxClubDisplayOrder(ctx context.Context, userID string) (int64, error)
 	MaxTeeDisplayOrder(ctx context.Context, courseID string) (int64, error)
 	RevokeAllUserRefreshTokens(ctx context.Context, arg RevokeAllUserRefreshTokensParams) error
@@ -54,6 +70,7 @@ type Querier interface {
 	// lower() gives ASCII-case-insensitive matching; callers pass a lowered term.
 	SearchCourses(ctx context.Context, arg SearchCoursesParams) ([]Course, error)
 	SetClubStatus(ctx context.Context, arg SetClubStatusParams) error
+	SetUserAvatarKey(ctx context.Context, arg SetUserAvatarKeyParams) error
 	SetUserEmailVerified(ctx context.Context, arg SetUserEmailVerifiedParams) error
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error
 	SumTeeYardage(ctx context.Context, teeID string) (int64, error)
@@ -64,7 +81,13 @@ type Querier interface {
 	UpdateTee(ctx context.Context, arg UpdateTeeParams) error
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) error
 	UpdateUserDistanceUnit(ctx context.Context, arg UpdateUserDistanceUnitParams) error
+	// Changing an address always drops verification: the new one has not been
+	// proven, and carrying the old flag over would mark an unproven address
+	// verified.
+	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) error
+	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 	UpsertHoleTeeDetail(ctx context.Context, arg UpsertHoleTeeDetailParams) error
+	UpsertUserAvatar(ctx context.Context, arg UpsertUserAvatarParams) error
 }
 
 var _ Querier = (*Queries)(nil)

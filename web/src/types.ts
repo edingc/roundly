@@ -16,7 +16,52 @@ export interface User {
    * only — everything is stored in yards. See lib/units.ts.
    */
   distance_unit: DistanceUnit
+
+  /** Profile fields. All optional — a display name is the only required identity. */
+  first_name: string | null
+  last_name: string | null
+  /**
+   * Relative path to the avatar image, or null. The key in it rotates on every
+   * upload, which is what lets the image be cached indefinitely.
+   */
+  avatar_url: string | null
+  home_course_id: string | null
+  /** Resolved server-side so the client need not fetch the course to name it. */
+  home_course_name: string | null
+  location_city: string | null
+  location_region: string | null
+  location_country: string | null
+
   created_at: string
+  updated_at: string
+}
+
+/** Payload for PUT /account/profile. */
+export interface ProfilePayload {
+  display_name: string
+  first_name?: string | null
+  last_name?: string | null
+  home_course_id?: string | null
+  location_city?: string | null
+  location_region?: string | null
+  location_country?: string | null
+}
+
+export interface ImportCounts {
+  imported: number
+  skipped: number
+  failed: number
+  skipped_names: string[]
+  failed_names: string[]
+  truncated: boolean
+}
+
+export interface ImportSummary {
+  format_version: number
+  profile: { fields_filled: string[] | null; fields_skipped: string[] | null }
+  clubs: ImportCounts
+  courses: ImportCounts
+  warnings: string[] | null
 }
 
 export interface Session {
