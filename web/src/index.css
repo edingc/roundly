@@ -42,10 +42,10 @@
 }
 
 .dark {
-  --chart-grid: var(--color-slate-800);
-  --chart-axis: var(--color-slate-600);
+  --chart-grid: var(--color-slate-700);
+  --chart-axis: var(--color-slate-500);
   --chart-label: var(--color-slate-400);
-  --chart-surface: var(--color-slate-900);
+  --chart-surface: var(--color-slate-800);
   --chart-series-1: var(--color-brand-400);
   --chart-series-2: var(--color-sky-400);
   --chart-series-3: var(--color-amber-400);
@@ -59,8 +59,8 @@
   }
 
   body {
-    @apply bg-slate-50 text-slate-900 antialiased;
-    @apply dark:bg-slate-950 dark:text-slate-100;
+    @apply bg-slate-100 text-slate-900 antialiased;
+    @apply dark:bg-slate-900 dark:text-slate-100;
   }
 
   /* A visible focus ring on keyboard navigation only. */
@@ -87,7 +87,7 @@
 
 @utility card {
   @apply rounded-xl border border-slate-200 bg-white shadow-sm;
-  @apply dark:border-slate-800 dark:bg-slate-900;
+  @apply dark:border-slate-700 dark:bg-slate-800;
 }
 
 @utility label {
@@ -98,7 +98,7 @@
   @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm;
   @apply placeholder:text-slate-400;
   @apply focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 focus:outline-none;
-  @apply dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500;
+  @apply dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500;
   @apply disabled:cursor-not-allowed disabled:opacity-60;
 }
 
@@ -124,13 +124,13 @@
 }
 
 @utility btn-secondary {
-  @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-50;
-  @apply dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800;
+  @apply btn border border-slate-300 bg-white text-slate-700 hover:bg-slate-100;
+  @apply dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700;
 }
 
 @utility btn-ghost {
-  @apply btn text-slate-600 hover:bg-slate-100 hover:text-slate-900;
-  @apply dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+  @apply btn text-slate-600 hover:bg-slate-200 hover:text-slate-900;
+  @apply dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-100;
 }
 
 @utility btn-danger {

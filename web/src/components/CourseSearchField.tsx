@@ -237,7 +237,7 @@ export function CourseSearchField({
         {showList && (
           // A listbox may only contain options, so the two empty states are
           // rendered as a sibling panel rather than as rows inside the list.
-          <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
+          <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-800">
             {results.length > 0 ? (
               <ul
                 id={listboxId}

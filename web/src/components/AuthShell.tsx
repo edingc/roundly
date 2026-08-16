@@ -54,7 +54,7 @@ export function OrDivider() {
         <div className="w-full border-t border-slate-200 dark:border-slate-700" />
       </div>
       <div className="relative flex justify-center">
-        <span className="bg-white px-3 text-xs font-medium tracking-wide text-slate-500 uppercase dark:bg-slate-900 dark:text-slate-400">
+        <span className="bg-white px-3 text-xs font-medium tracking-wide text-slate-500 uppercase dark:bg-slate-800 dark:text-slate-400">
           or
         </span>
       </div>

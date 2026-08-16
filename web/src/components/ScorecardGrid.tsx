@@ -269,7 +269,7 @@ export function ScorecardGrid({
               scope="row"
               className={cx(
                 gridLine,
-                'sticky left-0 z-10 bg-white px-2 py-2 text-center text-sm font-bold dark:bg-slate-900',
+                'sticky left-0 z-10 bg-white px-2 py-2 text-center text-sm font-bold dark:bg-slate-800',
               )}
             >
               {hole.hole_number}
@@ -712,7 +712,7 @@ function HorizontalScorecard({
                   className={cx(
                     gridLine,
                     teeGroupTop,
-                    'sticky left-0 z-10 w-24 bg-white px-2 py-1 text-left align-middle dark:bg-slate-900',
+                    'sticky left-0 z-10 w-24 bg-white px-2 py-1 text-left align-middle dark:bg-slate-800',
                   )}
                 >
                   <span className="flex min-w-0 items-center gap-1.5">
@@ -731,7 +731,7 @@ function HorizontalScorecard({
                   className={cx(
                     gridLine,
                     teeGroupTop,
-                    'sticky left-24 z-10 w-11 bg-white px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400',
+                    'sticky left-24 z-10 w-11 bg-white px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400',
                   )}
                 >
                   Par
@@ -786,7 +786,7 @@ function HorizontalScorecard({
                   scope="row"
                   className={cx(
                     gridLine,
-                    'sticky left-24 z-10 w-11 bg-white px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-900 dark:text-slate-400',
+                    'sticky left-24 z-10 w-11 bg-white px-1 py-1 text-center text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400',
                   )}
                 >
                   {unitColumnLabel(unit)}

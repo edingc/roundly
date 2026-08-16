@@ -105,7 +105,7 @@ export function ApiAccessSection() {
               <WarningIcon className="mt-0.5 size-4 shrink-0" />
               Save this key somewhere secure. For security, you will not be able to view it again.
             </p>
-            <code className="mt-3 block overflow-x-auto rounded-md bg-white px-3 py-2 font-mono text-sm break-all text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+            <code className="mt-3 block overflow-x-auto rounded-md bg-white px-3 py-2 font-mono text-sm break-all text-slate-900 dark:bg-slate-900 dark:text-slate-100">
               {created.token}
             </code>
             <div className="mt-3 flex flex-wrap gap-2">

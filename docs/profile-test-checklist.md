@@ -225,6 +225,14 @@ the quickest way.*
 
 ### Appearance and responsiveness
 
-- [ ] Walk all four sections in light and dark mode.
+- [ ] Cards stand off the page background in **both** themes - the edge should
+      be visible without hunting for the border.
+- [ ] In dark mode, inputs read as inset against the card, and the chart grid
+      lines are visible on it rather than lost in it.
+- [ ] Sticky columns on the scorecard match the card behind them while the grid
+      scrolls sideways, with no mismatched stripe.
+- [ ] The mobile browser chrome matches the page rather than being pure white
+      or black.
+- [ ] Walk all sections in light and dark mode.
 - [ ] At 390px wide: no horizontal page scrolling, the menu stays on screen, and the key list
       and forms stay usable.

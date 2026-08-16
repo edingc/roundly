@@ -223,7 +223,7 @@ export function TeeFields({
             type="color"
             value={values.color}
             onChange={(e) => update('color', e.target.value.toUpperCase())}
-            className="h-11 w-14 shrink-0 cursor-pointer rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-950"
+            className="h-11 w-14 shrink-0 cursor-pointer rounded-lg border border-slate-300 bg-white p-1 dark:border-slate-700 dark:bg-slate-900"
             aria-label="Tee color"
           />
           <input
