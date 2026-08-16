@@ -53,6 +53,17 @@ type Course struct {
 	Pinned       int64
 }
 
+type CourseRemovalRequest struct {
+	ID          string
+	CourseID    *string
+	CourseName  string
+	RequestedBy *string
+	Reason      string
+	CreatedAt   string
+	ResolvedAt  *string
+	Resolution  *string
+}
+
 type Hole struct {
 	ID            string
 	CourseID      string

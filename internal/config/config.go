@@ -30,6 +30,11 @@ type Config struct {
 
 	CORSOrigins []string
 
+	// AdminEmail names the account that may remove courses and settle removal
+	// requests. Empty means the instance has no administrator, in which case
+	// requests simply queue until one is configured.
+	AdminEmail string
+
 	// Personal API keys. The rate limit is per key rather than per user: a key
 	// is what a script holds, so it is the unit that can run away.
 	APIKeyRateLimit  int
@@ -54,6 +59,7 @@ func Load() (*Config, error) {
 		GoogleClientSecret: env("GOOGLE_CLIENT_SECRET", ""),
 		GoogleRedirectURL:  env("GOOGLE_REDIRECT_URL", ""),
 		PublicURL:          strings.TrimRight(env("PUBLIC_URL", "http://localhost:5173"), "/"),
+		AdminEmail:         env("ADMIN_EMAIL", ""),
 	}
 
 	accessTTL, err := envDuration("ACCESS_TOKEN_TTL", 15*time.Minute)

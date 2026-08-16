@@ -14,6 +14,7 @@ import type {
   Hole,
   ImportSummary,
   ProfilePayload,
+  RemovalRequest,
   Session,
   Tee,
   TeePayload,
@@ -426,6 +427,24 @@ export const api = {
 
   importAccount: (payload: unknown) =>
     request<ImportSummary>('/account/import', { method: 'POST', body: payload }),
+
+  // ---- Course removal ----
+
+  /** Asks the site administrator to remove a course. Nobody can remove one directly. */
+  requestCourseRemoval: (courseId: string, reason: string) =>
+    request<RemovalRequest>(`/courses/${courseId}/removal-request`, {
+      method: 'POST',
+      body: { reason },
+    }),
+
+  listRemovalRequests: () =>
+    request<{ requests: RemovalRequest[] }>('/admin/removal-requests'),
+
+  resolveRemovalRequest: (requestId: string, resolution: 'removed' | 'declined') =>
+    request<void>(`/admin/removal-requests/${requestId}/resolve`, {
+      method: 'POST',
+      body: { resolution },
+    }),
 
   // ---- API keys ----
 

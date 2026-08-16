@@ -24,10 +24,26 @@ type Service struct {
 	db     *database.DB
 	tokens *TokenIssuer
 	google *GoogleProvider
+	// adminEmail names the site administrator. Configuration rather than a
+	// column, because on a self-hosted instance the administrator is whoever
+	// runs the process — and a value in the environment cannot drift out of
+	// step with the database or be edited through the app. Empty means the
+	// instance has no administrator.
+	adminEmail string
 }
 
-func NewService(db *database.DB, tokens *TokenIssuer, google *GoogleProvider) *Service {
-	return &Service{db: db, tokens: tokens, google: google}
+func NewService(db *database.DB, tokens *TokenIssuer, google *GoogleProvider, adminEmail string) *Service {
+	return &Service{
+		db:         db,
+		tokens:     tokens,
+		google:     google,
+		adminEmail: httpx.NormalizeEmail(adminEmail),
+	}
+}
+
+// isAdminEmail reports whether an address is the configured administrator.
+func (s *Service) isAdminEmail(email string) bool {
+	return s.adminEmail != "" && httpx.NormalizeEmail(email) == s.adminEmail
 }
 
 // User is the API representation of an account.
@@ -64,6 +80,11 @@ type User struct {
 
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+
+	// IsAdmin is derived from configuration, never stored. It exists so the
+	// client can show the administrator's screens; every actual check happens
+	// server-side in RequireAdmin.
+	IsAdmin bool `json:"is_admin"`
 }
 
 // Distance units the app understands.
@@ -132,6 +153,7 @@ func (s *Service) toUser(ctx context.Context, row sqlc.User) (*User, error) {
 		LocationCountry: row.LocationCountry,
 		CreatedAt:       row.CreatedAt,
 		UpdatedAt:       row.UpdatedAt,
+		IsAdmin:         s.isAdminEmail(row.Email),
 	}, nil
 }
 

@@ -515,3 +515,157 @@ func TestAPIKeyViaXAPIKeyHeader(t *testing.T) {
 		t.Errorf("POST with X-API-Key: status = %d, want 403", rr.Code)
 	}
 }
+
+// newAdminTestServer builds a handler whose configured administrator is the
+// given address.
+func newAdminTestServer(t *testing.T, adminEmail string) (http.Handler, *database.DB) {
+	t.Helper()
+
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	db, err := database.Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	cfg := &config.Config{
+		Env:              "test",
+		JWTSecret:        []byte("test-secret-that-is-long-enough-to-sign"),
+		AccessTokenTTL:   15 * time.Minute,
+		RefreshTokenTTL:  24 * time.Hour,
+		PublicURL:        "http://localhost",
+		AdminEmail:       adminEmail,
+		APIKeyRateLimit:  1000,
+		APIKeyRateWindow: time.Minute,
+		APIKeyMaxPerUser: 10,
+	}
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	return New(cfg, db, nil, stop), db
+}
+
+// createCourse makes a course through the API and returns its ID.
+func createCourse(t *testing.T, h http.Handler, token, name string) string {
+	t.Helper()
+
+	rr := do(t, h, http.MethodPost, "/api/courses", token,
+		strings.NewReader(fmt.Sprintf(`{"name":%q,"hole_count":9}`, name)))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create course: %d %s", rr.Code, rr.Body.String())
+	}
+	var course struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &course); err != nil {
+		t.Fatalf("decode course: %v", err)
+	}
+	return course.ID
+}
+
+// Deleting a course is the one destructive act on shared data, so it is the one
+// course action a normal player cannot take.
+func TestOnlyAdminCanDeleteACourse(t *testing.T) {
+	h, _ := newAdminTestServer(t, "admin@example.test")
+	_, adminToken := signUp(t, h, "admin@example.test")
+	_, playerToken := signUp(t, h, "player@example.test")
+
+	courseID := createCourse(t, h, playerToken, "Shared GC")
+
+	// A normal player is refused, and the course is still there afterwards.
+	rr := do(t, h, http.MethodDelete, "/api/courses/"+courseID, playerToken)
+	if rr.Code != http.StatusForbidden {
+		t.Errorf("player delete: status = %d, want 403; body %s", rr.Code, rr.Body.String())
+	}
+	if check := do(t, h, http.MethodGet, "/api/courses/"+courseID, playerToken); check.Code != http.StatusOK {
+		t.Fatalf("the course vanished despite the refusal: %d", check.Code)
+	}
+
+	// Even though that same player can edit it freely.
+	edit := do(t, h, http.MethodPut, "/api/courses/"+courseID, playerToken,
+		strings.NewReader(`{"name":"Shared GC, corrected"}`))
+	if edit.Code != http.StatusOK {
+		t.Errorf("player edit: status = %d, want 200; body %s", edit.Code, edit.Body.String())
+	}
+
+	// The administrator can remove it.
+	if rr := do(t, h, http.MethodDelete, "/api/courses/"+courseID, adminToken); rr.Code != http.StatusNoContent {
+		t.Errorf("admin delete: status = %d, want 204; body %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestOnlyAdminCanReachTheRemovalQueue(t *testing.T) {
+	h, _ := newAdminTestServer(t, "admin@example.test")
+	_, adminToken := signUp(t, h, "admin@example.test")
+	_, playerToken := signUp(t, h, "player@example.test")
+
+	courseID := createCourse(t, h, playerToken, "Queued GC")
+
+	// Anyone may ask.
+	ask := do(t, h, http.MethodPost, "/api/courses/"+courseID+"/removal-request", playerToken,
+		strings.NewReader(`{"reason":"Duplicate entry"}`))
+	if ask.Code != http.StatusCreated {
+		t.Fatalf("request removal: status = %d, want 201; body %s", ask.Code, ask.Body.String())
+	}
+
+	// Nobody but the administrator may see or settle the queue.
+	if rr := do(t, h, http.MethodGet, "/api/admin/removal-requests", playerToken); rr.Code != http.StatusForbidden {
+		t.Errorf("player list: status = %d, want 403; body %s", rr.Code, rr.Body.String())
+	}
+	if rr := do(t, h, http.MethodGet, "/api/admin/removal-requests", adminToken); rr.Code != http.StatusOK {
+		t.Errorf("admin list: status = %d, want 200; body %s", rr.Code, rr.Body.String())
+	}
+}
+
+// With no ADMIN_EMAIL set there is no administrator, so nobody passes the gate
+// and requests simply queue.
+func TestNoAdminConfiguredMeansNobodyIsAdmin(t *testing.T) {
+	h, _ := newAdminTestServer(t, "")
+	_, token := signUp(t, h, "someone@example.test")
+
+	courseID := createCourse(t, h, token, "Unadministered GC")
+
+	if rr := do(t, h, http.MethodDelete, "/api/courses/"+courseID, token); rr.Code != http.StatusForbidden {
+		t.Errorf("delete: status = %d, want 403; body %s", rr.Code, rr.Body.String())
+	}
+	if rr := do(t, h, http.MethodGet, "/api/admin/removal-requests", token); rr.Code != http.StatusForbidden {
+		t.Errorf("queue: status = %d, want 403; body %s", rr.Code, rr.Body.String())
+	}
+	// The course is still readable and editable — no administrator does not
+	// mean no app.
+	if rr := do(t, h, http.MethodGet, "/api/courses/"+courseID, token); rr.Code != http.StatusOK {
+		t.Errorf("read: status = %d, want 200", rr.Code)
+	}
+}
+
+// An API key must not reach the administrator's routes, by any of the three
+// controls that should stop it.
+func TestAPIKeyCannotReachAdminRoutes(t *testing.T) {
+	h, db := newAdminTestServer(t, "admin@example.test")
+	adminID, adminToken := signUp(t, h, "admin@example.test")
+	courseID := createCourse(t, h, adminToken, "Admin's GC")
+
+	// The key belongs to the administrator, so only the API-key controls can
+	// be what refuses it.
+	key := mintKey(t, db, adminID)
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodGet, "/api/admin/removal-requests"},
+		{http.MethodPost, "/api/admin/removal-requests/abc/resolve"},
+		{http.MethodDelete, "/api/courses/" + courseID},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rr := do(t, h, tc.method, tc.path, key, strings.NewReader(`{"resolution":"removed"}`))
+			if rr.Code != http.StatusForbidden {
+				t.Errorf("status = %d, want 403; body %s", rr.Code, rr.Body.String())
+			}
+		})
+	}
+
+	// And the course survived every attempt.
+	if rr := do(t, h, http.MethodGet, "/api/courses/"+courseID, adminToken); rr.Code != http.StatusOK {
+		t.Errorf("the course was removed by an API key: %d", rr.Code)
+	}
+}

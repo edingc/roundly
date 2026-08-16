@@ -12,6 +12,7 @@ import AddCoursePage from './pages/AddCoursePage'
 import GolfBagPage from './pages/GolfBagPage'
 import YardageChartPage from './pages/YardageChartPage'
 import ProfilePage from './pages/ProfilePage'
+import AdminPage from './pages/AdminPage'
 
 /** Sends unauthenticated visitors to the login screen, remembering where they were. */
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -69,6 +70,7 @@ export default function App() {
         <Route path="/bag" element={<GolfBagPage />} />
         <Route path="/bag/chart" element={<YardageChartPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/admin" element={<AdminPage />} />
         {/* Settings became Profile. Kept so existing bookmarks still land. */}
         <Route path="/settings" element={<Navigate to="/profile" replace />} />
       </Route>

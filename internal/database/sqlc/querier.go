@@ -12,10 +12,13 @@ type Querier interface {
 	CountActiveAPIKeys(ctx context.Context, userID string) (int64, error)
 	CountActiveClubs(ctx context.Context, userID string) (int64, error)
 	CountCourses(ctx context.Context) (int64, error)
+	// Guards against a second request for a course that already has one waiting.
+	CountPendingRemovalRequestsForCourse(ctx context.Context, courseID *string) (int64, error)
 	CountSearchCourses(ctx context.Context, query string) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) error
 	CreateClub(ctx context.Context, arg CreateClubParams) error
 	CreateCourse(ctx context.Context, arg CreateCourseParams) error
+	CreateCourseRemovalRequest(ctx context.Context, arg CreateCourseRemovalRequestParams) error
 	CreateHole(ctx context.Context, arg CreateHoleParams) error
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) error
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
@@ -40,6 +43,7 @@ type Querier interface {
 	GetAvatarByUser(ctx context.Context, userID string) (UserAvatar, error)
 	GetClub(ctx context.Context, id string) (Club, error)
 	GetCourse(ctx context.Context, id string) (Course, error)
+	GetCourseRemovalRequest(ctx context.Context, id string) (CourseRemovalRequest, error)
 	GetHole(ctx context.Context, id string) (Hole, error)
 	GetHoleByNumber(ctx context.Context, arg GetHoleByNumberParams) (Hole, error)
 	GetHoleTeeDetail(ctx context.Context, arg GetHoleTeeDetailParams) (HoleTeeDetail, error)
@@ -62,6 +66,10 @@ type Querier interface {
 	// Uploader-scoped bulk reads for the account export. See ListTeesByUploader.
 	ListHolesByUploader(ctx context.Context, uploadedBy *string) ([]Hole, error)
 	ListOAuthAccountsByUser(ctx context.Context, userID string) ([]OauthAccount, error)
+	// The administrator's queue. Joined out to the requester's display name so the
+	// page does not have to resolve each one, and left-joined because a requester
+	// may since have deleted their account.
+	ListPendingCourseRemovalRequests(ctx context.Context) ([]ListPendingCourseRemovalRequestsRow, error)
 	ListTeesByCourse(ctx context.Context, courseID string) ([]Tee, error)
 	// Uploader-scoped bulk read for the account export. Reading per course instead
 	// would cost three queries each, which on a single-connection pool turns a
@@ -70,6 +78,7 @@ type Querier interface {
 	ListTeesByUploader(ctx context.Context, uploadedBy *string) ([]Tee, error)
 	MaxClubDisplayOrder(ctx context.Context, userID string) (int64, error)
 	MaxTeeDisplayOrder(ctx context.Context, courseID string) (int64, error)
+	ResolveCourseRemovalRequest(ctx context.Context, arg ResolveCourseRemovalRequestParams) error
 	// The user_id predicate is the ownership check: another user's key id matches
 	// zero rows rather than revoking their key.
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error

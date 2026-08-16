@@ -89,6 +89,14 @@ export function UserMenu() {
             Profile
           </Link>
 
+          {/* Shown only to the administrator. This is convenience, not
+              security — the server checks every admin route itself. */}
+          {user?.is_admin && (
+            <Link to="/admin" role="menuitem" className={itemClass} onClick={() => setOpen(false)}>
+              Administration
+            </Link>
+          )}
+
           <button
             type="button"
             role="menuitem"

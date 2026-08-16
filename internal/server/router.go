@@ -30,10 +30,10 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler, stop <-chan
 	googleProvider := auth.NewGoogleProvider(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL)
 	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
-	authService := auth.NewService(db, tokenIssuer, googleProvider)
+	authService := auth.NewService(db, tokenIssuer, googleProvider, cfg.AdminEmail)
 	authHandler := auth.NewHandler(authService, googleProvider, cfg.PublicURL, cfg.IsProd())
 	courseService := course.NewService(db)
-	courseHandler := course.NewHandler(courseService)
+	courseHandler := course.NewHandler(courseService, authService.RequireAdmin)
 	clubHandler := club.NewHandler(club.NewService(db))
 	accountHandler := account.NewHandler(account.NewService(db, authService, courseService))
 

@@ -90,3 +90,52 @@ func Email(ctx context.Context) (string, bool) {
 	email, ok := ctx.Value(emailKey).(string)
 	return email, ok && email != ""
 }
+
+// RequireAdmin refuses anyone who is not the configured site administrator.
+//
+// It reads the user's current address from the database rather than trusting
+// the email claim in the access token. The claim is a snapshot: a token minted
+// before an address change still carries the old one, which would leave a
+// 15-minute window in which administrator rights either linger after they
+// should have gone or fail to apply after they should have arrived. An admin
+// check is rare enough to afford the query.
+//
+// API keys never reach this — internal/apikey blocks the whole /api/admin
+// prefix, and its allow-list denies anything unlisted by default — but the
+// principal check here is the guarantee, not that.
+func (s *Service) RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+
+		if IsAPIKey(ctx) {
+			httpx.Error(w, r, httpx.Forbidden("API keys cannot perform administrator actions."))
+			return
+		}
+
+		userID, ok := UserID(ctx)
+		if !ok {
+			httpx.Error(w, r, httpx.Unauthorized("Sign in to continue."))
+			return
+		}
+
+		row, err := s.db.Queries.GetUserByID(ctx, userID)
+		if err != nil {
+			// A vanished user is not an administrator. Deliberately the same
+			// refusal as a live non-admin, so neither case is distinguishable.
+			httpx.Error(w, r, errNotAdmin())
+			return
+		}
+		if !s.isAdminEmail(row.Email) {
+			httpx.Error(w, r, errNotAdmin())
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// errNotAdmin is one message for every way of not being the administrator, so a
+// prober cannot use the difference to learn who is.
+func errNotAdmin() error {
+	return httpx.Forbidden("Only the site administrator can do that.")
+}

@@ -34,6 +34,12 @@ export interface User {
 
   created_at: string
   updated_at: string
+
+  /**
+   * Derived from server configuration, never stored. Use it to decide what to
+   * render; every actual permission check happens server-side.
+   */
+  is_admin: boolean
 }
 
 /** Payload for PUT /account/profile. */
@@ -183,6 +189,23 @@ export interface CourseExport {
     handicap_index: number | null
     tee_details: Array<{ tee_name: string; par: number; yardage: number }>
   }>
+}
+
+/**
+ * A request to take a course out of the directory. course_id goes null once the
+ * course is actually removed; course_name is a snapshot so the record still
+ * says what it was about.
+ */
+export interface RemovalRequest {
+  id: string
+  course_id: string | null
+  course_name: string
+  requested_by: string | null
+  requested_by_name: string | null
+  reason: string
+  created_at: string
+  resolved_at: string | null
+  resolution: string | null
 }
 
 export interface AuthConfig {

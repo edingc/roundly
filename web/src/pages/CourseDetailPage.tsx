@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
 import { useDistanceUnit } from '../lib/auth'
 import { fromYards, unitSuffix, type DistanceUnit } from '../lib/units'
@@ -16,6 +16,7 @@ import {
   Field,
   PageSpinner,
   PencilIcon,
+  cx,
   PlusIcon,
   Spinner,
   TrashIcon,
@@ -78,7 +79,6 @@ function teeTotal(course: CourseDetail, teeId: string, unit: DistanceUnit): numb
 
 export default function CourseDetailPage() {
   const { courseId } = useParams<{ courseId: string }>()
-  const navigate = useNavigate()
   const unit = useDistanceUnit()
 
   const [course, setCourse] = useState<CourseDetail | null>(null)
@@ -102,8 +102,11 @@ export default function CourseDetailPage() {
     null,
   )
   const [confirmDeleteTee, setConfirmDeleteTee] = useState<Tee | null>(null)
-  const [confirmDelete, setConfirmDelete] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [requestingRemoval, setRequestingRemoval] = useState(false)
+  const [removalReason, setRemovalReason] = useState('')
+  const [removalError, setRemovalError] = useState<string | null>(null)
+  const [sendingRemoval, setSendingRemoval] = useState(false)
+  const [removalRequested, setRemovalRequested] = useState(false)
   const [exporting, setExporting] = useState(false)
 
   const load = useCallback(async () => {
@@ -200,16 +203,21 @@ export default function CourseDetailPage() {
     }
   }
 
-  async function handleDeleteCourse() {
+  async function handleRequestRemoval(event: React.FormEvent) {
+    event.preventDefault()
     if (!courseId) return
-    setDeleting(true)
+    setSendingRemoval(true)
+    setRemovalError(null)
     try {
-      await api.deleteCourse(courseId)
-      navigate('/courses', { replace: true })
+      await api.requestCourseRemoval(courseId, removalReason)
+      setRemovalRequested(true)
+      setRequestingRemoval(false)
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not delete the course.')
-      setDeleting(false)
-      setConfirmDelete(false)
+      setRemovalError(
+        err instanceof ApiError ? (err.fields.reason ?? err.message) : 'Could not send that request.',
+      )
+    } finally {
+      setSendingRemoval(false)
     }
   }
 
@@ -536,38 +544,52 @@ export default function CourseDetailPage() {
       </section>
 
       <section className="border-t border-slate-200 pt-6 dark:border-slate-800">
-        {confirmDelete ? (
-          <div className="card space-y-3 border-red-300 p-5 dark:border-red-900">
-            <p className="text-sm font-medium">
-              Delete “{course.name}”? This also removes its tees, holes, and every par and
-              yardage you have entered.
-            </p>
+        {/* Nobody owns a course, so nobody removes one on their own. Removing
+            it cascades away every tee, hole, par, and yardage with no undo, so
+            the request goes to the site administrator instead. */}
+        {removalRequested ? (
+          <Alert tone="success">
+            Your removal request has been sent to the site administrator.
+          </Alert>
+        ) : requestingRemoval ? (
+          <form onSubmit={handleRequestRemoval} className="card space-y-3 p-5">
+            <div>
+              <label htmlFor="removal-reason" className="label">
+                Why should “{course.name}” be removed?
+              </label>
+              <textarea
+                id="removal-reason"
+                value={removalReason}
+                onChange={(e) => setRemovalReason(e.target.value)}
+                className={cx('input', removalError && 'input-error')}
+                rows={3}
+                maxLength={500}
+                placeholder="Duplicate of another entry, permanently closed, entered by mistake…"
+                required
+              />
+              {removalError && <p className="field-error">{removalError}</p>}
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => setConfirmDelete(false)}
+                onClick={() => setRequestingRemoval(false)}
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                className="btn-danger"
-                disabled={deleting}
-                onClick={() => void handleDeleteCourse()}
-              >
-                {deleting ? <Spinner label="Deleting" /> : 'Delete course'}
+              <button type="submit" className="btn-primary" disabled={sendingRemoval}>
+                {sendingRemoval ? <Spinner label="Sending" /> : 'Send request'}
               </button>
             </div>
-          </div>
+          </form>
         ) : (
           <button
             type="button"
             className="btn-ghost text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
-            onClick={() => setConfirmDelete(true)}
+            onClick={() => setRequestingRemoval(true)}
           >
             <TrashIcon className="size-4" />
-            Delete course
+            Request removal
           </button>
         )}
       </section>

@@ -28,6 +28,7 @@ func TestAllowed(t *testing.T) {
 		{"/api/clubs/abc/status", false},
 		{"/api/auth/me", false},
 		{"/api/account/export", false},
+		{"/api/admin/removal-requests", false},
 		{"/api/account/keys", false},
 		{"/api/avatars/abc.jpg", false},
 
@@ -57,12 +58,15 @@ func TestIsBlocked(t *testing.T) {
 		{"/api/auth/login", true},
 		{"/api/auth/google/callback", true},
 		{"/api/account", true},
+		{"/api/admin", true},
+		{"/api/admin/removal-requests", true},
 		{"/api/account/export", true},
 		{"/api/account/keys", true},
 		{"/api/account/avatar", true},
 
 		// Must not over-reach into paths that merely share a prefix string.
 		{"/api/accounts", false},
+		{"/api/administrators", false},
 		{"/api/authorized", false},
 		{"/api/clubs", false},
 		{"/api/me", false},

@@ -41,10 +41,14 @@ const (
 // Handler exposes the course directory endpoints.
 type Handler struct {
 	service *Service
+	// requireAdmin gates the one destructive action. Injected rather than
+	// reached for, so this package does not need to know how an administrator
+	// is identified.
+	requireAdmin func(http.Handler) http.Handler
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, requireAdmin func(http.Handler) http.Handler) *Handler {
+	return &Handler{service: service, requireAdmin: requireAdmin}
 }
 
 // Register attaches the course, tee, and hole endpoints to r, which the caller
@@ -63,10 +67,16 @@ func (h *Handler) Register(r chi.Router) {
 		cr.Route("/{courseID}", func(dr chi.Router) {
 			dr.Get("/", h.get)
 			dr.Put("/", h.update)
-			dr.Delete("/", h.delete)
 			dr.Get("/export", h.export)
 			dr.Post("/tees", h.addTee)
 			dr.Post("/holes", h.addHole)
+
+			// Anyone may ask for a course to be removed. Nobody but the
+			// administrator may actually remove one: it cascades away every
+			// tee, hole, par, and yardage, and there is no history to restore
+			// from.
+			dr.Post("/removal-request", h.requestRemoval)
+			dr.With(h.requireAdmin).Delete("/", h.delete)
 		})
 	})
 
@@ -80,6 +90,15 @@ func (h *Handler) Register(r chi.Router) {
 		hr.Delete("/", h.deleteHole)
 		hr.Put("/tee-details/{teeID}", h.setTeeDetail)
 		hr.Delete("/tee-details/{teeID}", h.clearTeeDetail)
+	})
+
+	// The administrator's queue. internal/apikey blocks this whole prefix, and
+	// its allow-list denies anything unlisted anyway, so an API key cannot
+	// reach it by either route.
+	r.Route("/admin/removal-requests", func(ar chi.Router) {
+		ar.Use(h.requireAdmin)
+		ar.Get("/", h.listRemovalRequests)
+		ar.Post("/{requestID}/resolve", h.resolveRemovalRequest)
 	})
 }
 

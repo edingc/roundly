@@ -21,6 +21,9 @@ import (
 //   - /api/account/*: the export is a GET and would hand over the entire
 //     account; the keys endpoint would enumerate the user's other credentials.
 //     Also hard-blocked in Guard.
+//   - /api/admin/*: administrator screens. The allow-list already denies them
+//     by being an allow-list, and RequireAdmin refuses an API-key principal
+//     outright; the prefix block is the third of the three.
 //   - /api/courses/{}/export: excluded by choice. It returns nothing that
 //     GET /api/courses/{} does not, and leaving it off keeps bulk scraping of
 //     the directory marginally less convenient.
@@ -38,7 +41,7 @@ var allowed = []string{
 }
 
 // blockedPrefixes are unreachable regardless of method or allow-list.
-var blockedPrefixes = []string{"/api/auth", "/api/account"}
+var blockedPrefixes = []string{"/api/auth", "/api/account", "/api/admin"}
 
 // CleanPath normalizes a request path for policy decisions.
 //

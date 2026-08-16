@@ -24,7 +24,7 @@ func newTestService(t *testing.T) *Service {
 	t.Cleanup(func() { db.Close() })
 
 	tokens := NewTokenIssuer([]byte("test-secret-key-of-sufficient-length"), 15*time.Minute, 24*time.Hour)
-	return NewService(db, tokens, NewGoogleProvider("", "", ""))
+	return NewService(db, tokens, NewGoogleProvider("", "", ""), "")
 }
 
 func TestHashAndVerifyPassword(t *testing.T) {
