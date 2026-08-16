@@ -22,10 +22,21 @@ import (
 // refusal is worth.
 type Service struct {
 	db *database.DB
+	// rounds answers one question: has this club been played? Deleting one that
+	// has would strip it out of the rounds it appears in, and those rounds are
+	// the only record of what was in hand. Nil in tests that never delete.
+	rounds ClubUsage
 }
 
-func NewService(db *database.DB) *Service {
-	return &Service{db: db}
+// ClubUsage is the sliver of the round service this package needs, named as one
+// question rather than taken as a package: internal/round already imports the
+// course service, and a concrete dependency here would tangle the two.
+type ClubUsage interface {
+	ClubPlayed(ctx context.Context, clubID string) (bool, error)
+}
+
+func NewService(db *database.DB, rounds ClubUsage) *Service {
+	return &Service{db: db, rounds: rounds}
 }
 
 // Bag returns every club the user owns, split into the three groups.
@@ -229,6 +240,22 @@ func (s *Service) Delete(ctx context.Context, userID, clubID string) error {
 	if _, err := s.load(ctx, userID, clubID); err != nil {
 		return err
 	}
+
+	// A club that has been played keeps its row. Phase 2 made retirement a soft
+	// delete precisely so that rounds could reference club ids, and this is the
+	// other half of that promise: DELETE stays for correcting a club typed in by
+	// mistake, and stops being available the moment the club has a history.
+	if s.rounds != nil {
+		played, err := s.rounds.ClubPlayed(ctx, clubID)
+		if err != nil {
+			return err
+		}
+		if played {
+			return httpx.Conflict(
+				"This club has been played in a round, so it cannot be deleted. Retire it instead - a retired club keeps its rounds and leaves the bag.")
+		}
+	}
+
 	if err := s.db.Queries.DeleteClub(ctx, clubID); err != nil {
 		return httpx.Internal(fmt.Errorf("delete club: %w", err))
 	}

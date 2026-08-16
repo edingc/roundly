@@ -44,7 +44,15 @@ while the running server was open:
 - [ ] Save with only a display name. It works — every other field is optional.
 - [ ] Clear the display name and save. Refused, on that field.
 - [ ] Fill in first and last name. The header initials change from the display name's to `CE`.
-- [ ] Set a home course. It survives a reload and shows the course's name.
+- [ ] Set a home course by typing a course **name**. Results show each course's town beneath it.
+- [ ] Search by **town** instead ("marne"). The courses there come back.
+- [ ] Pick one with the arrow keys and Enter, without touching the mouse.
+- [ ] Save, reload. The choice survives and shows both its name and its town.
+- [ ] Press Clear, then save. The home course is unset rather than left as it was.
+- [ ] Type a term nothing matches. The list says so instead of going blank.
+- [ ] On the courses screen, the home course is first — above a pinned course — with a blue
+      **Home** chiclet. Pin it too and both chiclets show.
+- [ ] Sign in as someone else. That course is back in its name position, with no chiclet.
 - [ ] Paste a name containing a newline. It is stored on one line.
 - [ ] Joined date matches the account's creation date.
 
@@ -130,6 +138,75 @@ Start the server with `ADMIN_EMAIL=you@example.com`.
 - [ ] **The course you added is still there, with no attribution** — and another player who had
       it as their home course still has it. *(This is the cross-user damage the design exists to
       prevent.)*
+
+### Optional fields
+
+- [ ] First name, last name, city, state, and country all say **Optional** *inside* the box,
+      not in a caption under it, and the word disappears as soon as you type.
+- [ ] Home course says `Optional — search by name or town`, and drops the "Optional" once a
+      course is picked.
+- [ ] Display name, which is required, says nothing.
+
+### Photos
+
+*Run these with the network tab open.*
+
+- [ ] The `avatar_url` in `/api/auth/me` carries `?exp=…&sig=…`.
+- [ ] Pasting that full URL into a new tab shows the image.
+- [ ] Stripping the query string off it returns **404**, not 403 and not the image. *(This is
+      the old, permanent URL; it must be dead.)*
+- [ ] Changing one character of `sig` returns 404.
+- [ ] The response has `Cache-Control: private`, `X-Robots-Tag: noindex`, and
+      `Referrer-Policy: no-referrer`.
+- [ ] Uploading a new photo changes the path, and the previous URL 404s immediately.
+
+### Confirming an email address
+
+*Needs `MAIL_FROM` plus a transport. With mail unset, none of this should appear at all.*
+
+- [ ] A fresh signup lands on **Confirm your email** and cannot reach courses, the bag, or the
+      profile.
+- [ ] **Send the link again** delivers a second email, and the first link then fails.
+- [ ] Opening the link in a **different browser** — signed out — still confirms it.
+- [ ] Opening the same link twice: the second time says the link did not work.
+- [ ] Back in the original tab, **I have confirmed it** lets you into the app.
+- [ ] Changing the email address un-confirms the account and mails a link to the new address.
+- [ ] With mail unconfigured, signup goes straight into the app, exactly as before.
+
+### Two-factor
+
+- [ ] The two-factor card is absent when mail is unconfigured.
+- [ ] On a Google-only account it explains that there is no password to guard.
+- [ ] On an unconfirmed account it refuses and says to confirm the address first.
+- [ ] A wrong current password is refused.
+- [ ] Turning it on, then signing out and back in: the password step is followed by a code step.
+- [ ] A wrong code is refused; five wrong codes kill the challenge so even the right one fails.
+- [ ] **Trust this browser** ticked, then sign out and in again: no code.
+- [ ] The same account in a private window: still asked for a code.
+- [ ] The remembered browser appears under **Remembered browsers**, tagged *This browser*.
+- [ ] Forgetting it means the next sign-in asks for a code again.
+- [ ] Changing the password forgets every remembered browser.
+- [ ] Turning two-factor off asks for the password, and sign-in goes straight through afterwards.
+
+### Course ratings
+
+- [ ] The control is in **Preferences**, not Personal information.
+- [ ] It saves the moment you touch it — there is no Save button in that section.
+- [ ] Changing it and then reloading the page keeps the new value.
+- [ ] Change it, then save the **profile** form above: the rating setting is
+      unchanged. *(The two are written by different endpoints precisely so that
+      saving a name cannot disturb it.)*
+- [ ] Change the units: the rating setting is unchanged.
+- [ ] Setting it back to **Not set** sticks, and rounds then use the men's
+      ratings.
+
+### Section order
+
+- [ ] The page reads: Personal information, Preferences, Sign-in & security, Your data,
+      API access, Danger zone.
+- [ ] Email and password are in the same section, email first.
+- [ ] Changing the email still signs out other devices and still demands the current password —
+      the move was cosmetic and must not have altered either.
 
 ### Appearance and responsiveness
 

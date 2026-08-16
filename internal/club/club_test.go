@@ -26,7 +26,7 @@ func newTestService(t *testing.T) (*Service, *database.DB) {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	return NewService(db), db
+	return NewService(db, nil), db
 }
 
 // clubs.user_id is a foreign key, so tests need real user rows.
@@ -605,3 +605,37 @@ func TestValidateStatusRejectsUnknown(t *testing.T) {
 
 // mustErr discards a value so table-driven tests can hold mixed-arity calls.
 func mustErr[T any](_ T, err error) error { return err }
+
+// stubUsage stands in for the round service.
+type stubUsage struct{ played bool }
+
+func (s stubUsage) ClubPlayed(context.Context, string) (bool, error) { return s.played, nil }
+
+// Phase 2 made retirement a soft delete so that rounds could reference club
+// ids. This is the other half of that promise: once a club has been played, it
+// keeps its row.
+func TestDeleteRefusesAClubThatHasBeenPlayed(t *testing.T) {
+	_, db := newTestService(t)
+	userID := createUser(t, db, "player@example.com")
+
+	svc := NewService(db, stubUsage{played: true})
+	created, err := svc.Create(context.Background(), userID, ClubInput{Type: "driver", Label: "Driver"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	err = svc.Delete(context.Background(), userID, created.ID)
+	if err == nil {
+		t.Fatal("err = nil, want the delete refused")
+	}
+	if _, err := svc.Get(context.Background(), userID, created.ID); err != nil {
+		t.Errorf("the club was deleted anyway: %v", err)
+	}
+
+	// A club that has never been played is still deletable, which is what keeps
+	// DELETE useful for correcting a mistyped club.
+	unplayed := NewService(db, stubUsage{played: false})
+	if err := unplayed.Delete(context.Background(), userID, created.ID); err != nil {
+		t.Errorf("deleting an unplayed club: %v", err)
+	}
+}

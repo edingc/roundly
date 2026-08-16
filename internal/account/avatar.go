@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -26,10 +27,11 @@ const avatarKeyLen = 22
 // newAvatarKey mints the unguessable stem an avatar is served under.
 //
 // Rotating this on every upload is what makes the immutable cache header
-// correct: the bytes behind a given URL genuinely never change, so a browser,
-// a CDN, or the service worker can hold it forever, and replacing the image
+// correct: the bytes behind a given key genuinely never change, so a browser
+// can hold it for as long as the link lives, and replacing the image
 // invalidates every cache by changing the URL rather than by asking nicely.
-// It also means a link shared from an old avatar stops resolving.
+// It also means a link shared from an old avatar stops resolving immediately,
+// rather than waiting out the signature that auth.AvatarSigner puts on it.
 func newAvatarKey() (string, error) {
 	buf := make([]byte, 16)
 	if _, err := rand.Read(buf); err != nil {
@@ -167,17 +169,32 @@ func avatarUploadError(err error) error {
 	return httpx.BadRequest("That upload could not be read.")
 }
 
-// ServeAvatar returns an avatar image by its key.
+// ServeAvatar returns an avatar image by its key, if the URL's signature is
+// still good.
 //
 // Registered outside the authenticated group on purpose: an <img> tag cannot
 // send an Authorization header, and this SPA keeps its access token in memory
-// only. The unguessable, rotating key in the path is what stands in for
-// authentication — the same trade-off Gravatar and every CDN-hosted avatar
-// makes. Anyone holding the URL can view that image until it is replaced.
+// only. What stands in for authentication is the signed, expiring URL the
+// server hands out with the user — see auth.AvatarSigner for why that shape and
+// not a session cookie. Two things have to hold: the key has to name a real
+// avatar, and the query string has to be one this instance signed and has not
+// yet let lapse.
 func (h *Handler) ServeAvatar(w http.ResponseWriter, r *http.Request) {
 	name := chi.URLParam(r, "name")
 	key, ok := strings.CutSuffix(name, ".jpg")
 	if !ok || !validAvatarKey(key) {
+		httpx.Error(w, r, httpx.NotFound("That image does not exist."))
+		return
+	}
+
+	// Checked before the database is touched, so an unsigned request costs a
+	// hash rather than a query on the one write connection this server has.
+	query := r.URL.Query()
+	expiry, err := h.service.auth.Avatars().Verify(key, query.Get("exp"), query.Get("sig"))
+	if err != nil {
+		// Not 403: a caller who cannot present a valid link has no business
+		// learning whether the key behind it names anything. This is the same
+		// answer a made-up key gets.
 		httpx.Error(w, r, httpx.NotFound("That image does not exist."))
 		return
 	}
@@ -194,8 +211,31 @@ func (h *Handler) ServeAvatar(w http.ResponseWriter, r *http.Request) {
 
 	modTime, _ := timex.Parse(row.UpdatedAt)
 	w.Header().Set("Content-Type", row.ContentType)
-	// Safe to cache forever precisely because the key rotates on replacement.
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
+	writeAvatarPrivacyHeaders(w, expiry)
 	http.ServeContent(w, r, name, modTime, bytes.NewReader(row.Image))
+}
+
+// writeAvatarPrivacyHeaders keeps a personal photo out of the places it would
+// otherwise drift into.
+//
+// Each line is a different leak. `private` stops a shared proxy or a CDN from
+// holding a copy that outlives the signature — the old `public` was wrong the
+// moment these stopped being world-readable. The max-age stops at the exact
+// second the URL does, so no cache can serve a picture whose link has lapsed.
+// X-Robots-Tag keeps it out of image search if a link ever reaches a crawler,
+// and no-referrer means following one of these leaks nothing about where it
+// was found. The image itself is `immutable` in the only sense that matters:
+// the key rotates on every upload, so the bytes behind a given key never do.
+func writeAvatarPrivacyHeaders(w http.ResponseWriter, expiry time.Time) {
+	maxAge := int(time.Until(expiry).Seconds())
+	if maxAge < 0 {
+		maxAge = 0
+	}
+	w.Header().Set("Cache-Control", fmt.Sprintf("private, max-age=%d, immutable", maxAge))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Robots-Tag", "noindex, nofollow, noimageindex")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	// Navigating straight to the image should render a picture and nothing
+	// else — no script, no frame, no subresource of any kind.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src 'self'; sandbox")
 }

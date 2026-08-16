@@ -5,9 +5,16 @@ import { useDistanceUnit } from '../lib/auth'
 import { fromYards, unitSuffix, type DistanceUnit } from '../lib/units'
 import { formatPhone, phoneHref } from '../lib/phone'
 import { slugify } from '../lib/slug'
+import { formatCourseAddress } from '../lib/location'
 import type { CourseDetail, Tee, TeePayload } from '../types'
 import { ScorecardGrid } from '../components/ScorecardGrid'
 import { TeeDialog, emptyTeeForm, teeToForm } from '../components/TeeForm'
+import {
+  LocationFields,
+  emptyLocationForm,
+  locationFormToPayload,
+  locationToForm,
+} from '../components/LocationFields'
 import {
   Alert,
   ChevronLeftIcon,
@@ -28,12 +35,25 @@ import {
  */
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
 
-function mapsEmbedUrl(address: string): string {
-  return `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(address)}&maptype=satellite`
+/**
+ * What both map links search for: the course name followed by whatever of its
+ * address is known.
+ *
+ * The name leads because this is a place lookup, not a postal one — it is how
+ * a person would type a golf course into Maps, and it is what keeps the pin on
+ * the clubhouse for a course entered with only a city.
+ */
+function mapsQuery(course: CourseDetail): string {
+  const address = formatCourseAddress(course)
+  return address === '' ? course.name : `${course.name}, ${address}`
 }
 
-function mapsSearchUrl(address: string): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+function mapsEmbedUrl(course: CourseDetail): string {
+  return `https://www.google.com/maps/embed/v1/place?key=${GOOGLE_MAPS_API_KEY}&q=${encodeURIComponent(mapsQuery(course))}&maptype=satellite`
+}
+
+function mapsSearchUrl(course: CourseDetail): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapsQuery(course))}`
 }
 
 /** Builds e.g. "M 72.4/135 · W 74.8/140", omitting a gender with no rating set. */
@@ -87,13 +107,11 @@ export default function CourseDetailPage() {
 
   const [editingDetails, setEditingDetails] = useState(false)
   const [name, setName] = useState('')
-  const [address, setAddress] = useState('')
+  const [location, setLocation] = useState(emptyLocationForm())
   const [phone, setPhone] = useState('')
   const [website, setWebsite] = useState('')
   const [notes, setNotes] = useState('')
   const [facilityType, setFacilityType] = useState('')
-  const [latitude, setLatitude] = useState('')
-  const [longitude, setLongitude] = useState('')
   const [pinned, setPinned] = useState(false)
   const [savingDetails, setSavingDetails] = useState(false)
   const [detailErrors, setDetailErrors] = useState<Record<string, string>>({})
@@ -115,13 +133,11 @@ export default function CourseDetailPage() {
       const detail = await api.getCourse(courseId)
       setCourse(detail)
       setName(detail.name)
-      setAddress(detail.address ?? '')
+      setLocation(locationToForm(detail))
       setPhone(detail.phone ?? '')
       setWebsite(detail.website ?? '')
       setNotes(detail.notes ?? '')
       setFacilityType(detail.facility_type ?? '')
-      setLatitude(detail.latitude != null ? String(detail.latitude) : '')
-      setLongitude(detail.longitude != null ? String(detail.longitude) : '')
       setPinned(detail.pinned)
       setError(null)
     } catch (err) {
@@ -143,13 +159,11 @@ export default function CourseDetailPage() {
     try {
       const updated = await api.updateCourse(courseId, {
         name,
-        address: address.trim() === '' ? null : address,
+        ...locationFormToPayload(location),
         phone: phone.trim() === '' ? null : formatPhone(phone),
         website: website.trim() === '' ? null : website,
         notes: notes.trim() === '' ? null : notes,
         facility_type: facilityType === '' ? null : facilityType,
-        latitude: latitude.trim() === '' ? null : Number(latitude),
-        longitude: longitude.trim() === '' ? null : Number(longitude),
         pinned,
       })
       setCourse(updated)
@@ -235,6 +249,9 @@ export default function CourseDetailPage() {
     )
   }
 
+  // Empty when the course has no address at all, which is what both the
+  // address line and the map key off.
+  const courseAddress = formatCourseAddress(course)
 
   return (
     <div className="space-y-6">
@@ -259,13 +276,11 @@ export default function CourseDetailPage() {
             required
             maxLength={120}
           />
-          <Field
-            label="Address"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            error={detailErrors.address}
-            maxLength={240}
-            placeholder="Optional"
+          <LocationFields
+            values={location}
+            errors={detailErrors}
+            onChange={setLocation}
+            idPrefix="edit-course"
           />
           <Field
             label="Phone number"
@@ -305,30 +320,6 @@ export default function CourseDetailPage() {
               <p className="field-error">{detailErrors.facility_type}</p>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="Latitude"
-              type="number"
-              value={latitude}
-              onChange={(e) => setLatitude(e.target.value)}
-              error={detailErrors.latitude}
-              placeholder="Optional"
-              step="any"
-              min={-90}
-              max={90}
-            />
-            <Field
-              label="Longitude"
-              type="number"
-              value={longitude}
-              onChange={(e) => setLongitude(e.target.value)}
-              error={detailErrors.longitude}
-              placeholder="Optional"
-              step="any"
-              min={-180}
-              max={180}
-            />
-          </div>
           <div>
             <label className="label">Notes</label>
             <textarea
@@ -357,13 +348,11 @@ export default function CourseDetailPage() {
               onClick={() => {
                 setEditingDetails(false)
                 setName(course.name)
-                setAddress(course.address ?? '')
+                setLocation(locationToForm(course))
                 setPhone(course.phone ?? '')
                 setWebsite(course.website ?? '')
                 setNotes(course.notes ?? '')
                 setFacilityType(course.facility_type ?? '')
-                setLatitude(course.latitude != null ? String(course.latitude) : '')
-                setLongitude(course.longitude != null ? String(course.longitude) : '')
                 setPinned(course.pinned)
                 setDetailErrors({})
               }}
@@ -379,15 +368,15 @@ export default function CourseDetailPage() {
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight break-words">{course.name}</h1>
-            {course.address && (
+            {courseAddress && (
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                 <a
-                  href={mapsSearchUrl(course.address)}
+                  href={mapsSearchUrl(course)}
                   target="_blank"
                   rel="noreferrer"
                   className="hover:text-brand-700 hover:underline dark:hover:text-brand-300"
                 >
-                  {course.address}
+                  {courseAddress}
                 </a>
               </p>
             )}
@@ -461,10 +450,10 @@ export default function CourseDetailPage() {
         </div>
       )}
 
-      {course.address && GOOGLE_MAPS_API_KEY && (
+      {courseAddress && GOOGLE_MAPS_API_KEY && (
         <iframe
           title={`Map of ${course.name}`}
-          src={mapsEmbedUrl(course.address)}
+          src={mapsEmbedUrl(course)}
           className="block h-64 w-full rounded-xl border-0"
           loading="lazy"
           referrerPolicy="no-referrer-when-downgrade"

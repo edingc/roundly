@@ -11,6 +11,11 @@ import {
 } from '../components/TeeForm'
 import { ScorecardGrid } from '../components/ScorecardGrid'
 import {
+  LocationFields,
+  emptyLocationForm,
+  locationFormToPayload,
+} from '../components/LocationFields'
+import {
   Alert,
   ChevronLeftIcon,
   Field,
@@ -34,13 +39,11 @@ export default function AddCoursePage() {
 
   const [step, setStep] = useState<Step>(1)
   const [name, setName] = useState('')
-  const [address, setAddress] = useState('')
+  const [location, setLocation] = useState(emptyLocationForm())
   const [phone, setPhone] = useState('')
   const [website, setWebsite] = useState('')
   const [notes, setNotes] = useState('')
   const [facilityType, setFacilityType] = useState('')
-  const [latitude, setLatitude] = useState('')
-  const [longitude, setLongitude] = useState('')
   const [pinned, setPinned] = useState(false)
   const [holeCount, setHoleCount] = useState<9 | 18>(18)
   const [tees, setTees] = useState<TeeFormValues[]>([emptyTeeForm()])
@@ -74,13 +77,11 @@ export default function AddCoursePage() {
     try {
       const detail = await api.createCourse({
         name,
-        address: address.trim() === '' ? null : address,
+        ...locationFormToPayload(location),
         phone: phone.trim() === '' ? null : formatPhone(phone),
         website: website.trim() === '' ? null : website,
         notes: notes.trim() === '' ? null : notes,
         facility_type: facilityType === '' ? null : facilityType,
-        latitude: latitude.trim() === '' ? null : Number(latitude),
-        longitude: longitude.trim() === '' ? null : Number(longitude),
         pinned,
         hole_count: holeCount,
         tees: tees
@@ -180,13 +181,11 @@ export default function AddCoursePage() {
             placeholder="Pebble Ridge Golf Club"
             autoFocus
           />
-          <Field
-            label="Address"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            error={errors.address}
-            maxLength={240}
-            placeholder="Optional"
+          <LocationFields
+            values={location}
+            errors={errors}
+            onChange={setLocation}
+            idPrefix="add-course"
           />
           <Field
             label="Phone number"
@@ -225,30 +224,6 @@ export default function AddCoursePage() {
             {errors.facility_type && (
               <p className="field-error">{errors.facility_type}</p>
             )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field
-              label="Latitude"
-              type="number"
-              value={latitude}
-              onChange={(e) => setLatitude(e.target.value)}
-              error={errors.latitude}
-              placeholder="Optional"
-              step="any"
-              min={-90}
-              max={90}
-            />
-            <Field
-              label="Longitude"
-              type="number"
-              value={longitude}
-              onChange={(e) => setLongitude(e.target.value)}
-              error={errors.longitude}
-              placeholder="Optional"
-              step="any"
-              min={-180}
-              max={180}
-            />
           </div>
           <div>
             <label className="label">Notes</label>

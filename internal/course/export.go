@@ -15,7 +15,7 @@ import (
 
 // courseExportFormatVersion is bumped whenever the export shape changes in a
 // way that would break importing an older file.
-const courseExportFormatVersion = 3
+const courseExportFormatVersion = 4
 
 // minCourseExportVersion is the oldest file this server still reads.
 //
@@ -24,6 +24,10 @@ const courseExportFormatVersion = 3
 // was written but never checked until now: files stamped 1 and 2 are in users'
 // hands already, and retroactively demanding 3 would break exports this app
 // itself produced.
+//
+// Version 4 replaced `address` with the five location fields. Files stamped 1
+// through 3 still import because their `address` is read into `street` — see
+// CourseExport.Address.
 const minCourseExportVersion = 1
 
 // CheckFormatVersion rejects a file this server cannot read.
@@ -51,17 +55,23 @@ func CheckFormatVersion(got, min, max int, what string) error {
 // downloaded from one instance can be uploaded to another (or the same one)
 // unmodified.
 type CourseExport struct {
-	FormatVersion int          `json:"format_version"`
-	ID            string       `json:"id,omitempty"`
-	Name          string       `json:"name"`
-	Address       *string      `json:"address"`
-	Phone         *string      `json:"phone"`
-	Website       *string      `json:"website"`
-	FacilityType  *string      `json:"facility_type"`
-	Latitude      *float64     `json:"latitude"`
-	Longitude     *float64     `json:"longitude"`
-	Tees          []teeRequest `json:"tees"`
-	Holes         []holeExport `json:"holes"`
+	FormatVersion int    `json:"format_version"`
+	ID            string `json:"id,omitempty"`
+	Name          string `json:"name"`
+	Location
+	// Address is the pre-version-4 single address line, read on import and
+	// never written: a file this server produces carries the five location
+	// fields instead. It lands in Street, which is where the rest of an
+	// unparsed address line already lives (see migration 00014), so importing
+	// an old file loses nothing and the parts can be split by hand afterwards.
+	Address      *string      `json:"address,omitempty"`
+	Phone        *string      `json:"phone"`
+	Website      *string      `json:"website"`
+	FacilityType *string      `json:"facility_type"`
+	Latitude     *float64     `json:"latitude"`
+	Longitude    *float64     `json:"longitude"`
+	Tees         []teeRequest `json:"tees"`
+	Holes        []holeExport `json:"holes"`
 }
 
 type holeExport struct {
@@ -127,9 +137,18 @@ func (h *Handler) importCourse(w http.ResponseWriter, r *http.Request) {
 // courses through exactly the same rules, rather than growing a second, subtly
 // different copy of them.
 func ValidateImport(req CourseExport) (ImportCourseInput, error) {
-	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website, nil, req.FacilityType, req.Latitude, req.Longitude)
+	loc := req.Location
+	if loc.Street == nil {
+		loc.Street = req.Address
+	}
 
+	v := httpx.NewValidator()
+	validateCourseFields(v, req.Name, loc, req.Phone, req.Website, nil, req.FacilityType, req.Latitude, req.Longitude)
+
+	if len(req.Tees) > MaxTeesPerCourse {
+		v.Add("tees", fmt.Sprintf("A course can have at most %d tees.", MaxTeesPerCourse))
+		return ImportCourseInput{}, v.Err()
+	}
 	tees := make([]TeeInput, 0, len(req.Tees))
 	teeNameSeen := make(map[string]bool, len(req.Tees))
 	for i, tee := range req.Tees {
@@ -187,7 +206,7 @@ func ValidateImport(req CourseExport) (ImportCourseInput, error) {
 	return ImportCourseInput{
 		ID:           req.ID,
 		Name:         req.Name,
-		Address:      req.Address,
+		Location:     loc,
 		Phone:        req.Phone,
 		Website:      req.Website,
 		FacilityType: req.FacilityType,
@@ -268,7 +287,7 @@ func buildExport(detail *CourseDetail) CourseExport {
 		FormatVersion: courseExportFormatVersion,
 		ID:            detail.ID,
 		Name:          detail.Name,
-		Address:       detail.Address,
+		Location:      detail.Location,
 		Phone:         detail.Phone,
 		Website:       detail.Website,
 		FacilityType:  detail.FacilityType,

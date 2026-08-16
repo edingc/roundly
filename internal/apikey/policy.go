@@ -38,6 +38,9 @@ var allowed = []string{
 	"/api/clubs",
 	"/api/clubs/options",
 	"/api/clubs/{}",
+	"/api/rounds",
+	"/api/rounds/{}",
+	"/api/stats/overview",
 }
 
 // blockedPrefixes are unreachable regardless of method or allow-list.

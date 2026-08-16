@@ -99,7 +99,7 @@ func (q *Queries) GetAvatarByUser(ctx context.Context, userID string) (UserAvata
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, display_name, email_verified, created_at, distance_unit, first_name, last_name, avatar_key, home_course_id, location_city, location_region, location_country, updated_at FROM users WHERE email = ?
+SELECT id, email, password_hash, display_name, email_verified, two_factor_email, first_name, last_name, avatar_key, home_course_id, location_city, location_region, location_country, distance_unit, created_at, updated_at, gender FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -111,8 +111,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.PasswordHash,
 		&i.DisplayName,
 		&i.EmailVerified,
-		&i.CreatedAt,
-		&i.DistanceUnit,
+		&i.TwoFactorEmail,
 		&i.FirstName,
 		&i.LastName,
 		&i.AvatarKey,
@@ -120,13 +119,16 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LocationCity,
 		&i.LocationRegion,
 		&i.LocationCountry,
+		&i.DistanceUnit,
+		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Gender,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, display_name, email_verified, created_at, distance_unit, first_name, last_name, avatar_key, home_course_id, location_city, location_region, location_country, updated_at FROM users WHERE id = ?
+SELECT id, email, password_hash, display_name, email_verified, two_factor_email, first_name, last_name, avatar_key, home_course_id, location_city, location_region, location_country, distance_unit, created_at, updated_at, gender FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -138,8 +140,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.PasswordHash,
 		&i.DisplayName,
 		&i.EmailVerified,
-		&i.CreatedAt,
-		&i.DistanceUnit,
+		&i.TwoFactorEmail,
 		&i.FirstName,
 		&i.LastName,
 		&i.AvatarKey,
@@ -147,7 +148,10 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.LocationCity,
 		&i.LocationRegion,
 		&i.LocationCountry,
+		&i.DistanceUnit,
+		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Gender,
 	)
 	return i, err
 }
@@ -182,6 +186,23 @@ func (q *Queries) SetUserEmailVerified(ctx context.Context, arg SetUserEmailVeri
 	return err
 }
 
+const setUserGender = `-- name: SetUserGender :exec
+UPDATE users SET gender = ?, updated_at = ? WHERE id = ?
+`
+
+type SetUserGenderParams struct {
+	Gender    *string
+	UpdatedAt string
+	ID        string
+}
+
+// Gender is a preference, not a profile field, so it has its own statement:
+// saving a name must not be able to disturb which ratings a round records.
+func (q *Queries) SetUserGender(ctx context.Context, arg SetUserGenderParams) error {
+	_, err := q.db.ExecContext(ctx, setUserGender, arg.Gender, arg.UpdatedAt, arg.ID)
+	return err
+}
+
 const setUserPasswordHash = `-- name: SetUserPasswordHash :exec
 UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?
 `
@@ -194,6 +215,21 @@ type SetUserPasswordHashParams struct {
 
 func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error {
 	_, err := q.db.ExecContext(ctx, setUserPasswordHash, arg.PasswordHash, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const setUserTwoFactorEmail = `-- name: SetUserTwoFactorEmail :exec
+UPDATE users SET two_factor_email = ?, updated_at = ? WHERE id = ?
+`
+
+type SetUserTwoFactorEmailParams struct {
+	TwoFactorEmail int64
+	UpdatedAt      string
+	ID             string
+}
+
+func (q *Queries) SetUserTwoFactorEmail(ctx context.Context, arg SetUserTwoFactorEmailParams) error {
+	_, err := q.db.ExecContext(ctx, setUserTwoFactorEmail, arg.TwoFactorEmail, arg.UpdatedAt, arg.ID)
 	return err
 }
 
@@ -240,6 +276,9 @@ type UpdateUserEmailParams struct {
 // Changing an address always drops verification: the new one has not been
 // proven, and carrying the old flag over would mark an unproven address
 // verified.
+// Clearing email_verified is part of the same statement rather than a separate
+// call, so there is no window in which the row names a new address and still
+// claims the old one was confirmed. Callers only have to send the new link.
 func (q *Queries) UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) error {
 	_, err := q.db.ExecContext(ctx, updateUserEmail, arg.Email, arg.UpdatedAt, arg.ID)
 	return err

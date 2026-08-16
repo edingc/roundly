@@ -11,6 +11,7 @@ import (
 
 	"github.com/edingc/roundly/internal/auth"
 	"github.com/edingc/roundly/internal/httpx"
+	"github.com/edingc/roundly/internal/ratelimit"
 )
 
 // Guard authenticates API keys and enforces that they can only read.
@@ -24,7 +25,7 @@ import (
 //
 // A request that does not present a key passes straight through untouched, so
 // the JWT path is unaffected.
-func Guard(service *Service, requests, failures *Limiter) func(http.Handler) http.Handler {
+func Guard(service *Service, requests, failures *ratelimit.Limiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// 1. Not an API request. The SPA and its assets are none of this
@@ -76,13 +77,20 @@ func Guard(service *Service, requests, failures *Limiter) func(http.Handler) htt
 			// 7. Authenticate. Rate-limit failures by IP first: guessing a
 			//    256-bit token is hopeless, but each attempt still costs an
 			//    indexed query on the only connection the server has.
+			//
+			//    Checked without recording, then recorded only if the key turns
+			//    out to be bad. Using Allow here instead counted every
+			//    key-authenticated request against the failure budget, which
+			//    silently capped a working key at this limiter's 20/min however
+			//    high API_KEY_RATE_LIMIT was set.
 			ip := clientIP(r)
-			if okFail, _, resetAt := failures.Allow("fail:"+ip, time.Now()); !okFail {
+			if blocked, resetAt := failures.Exceeded("fail:"+ip, time.Now()); blocked {
 				writeRateLimited(w, r, failures, 0, resetAt)
 				return
 			}
 			principal, err := service.Authenticate(r.Context(), presented)
 			if err != nil {
+				failures.Allow("fail:"+ip, time.Now())
 				reject(w, r, "unauthenticated", presented, err)
 				return
 			}
@@ -142,13 +150,13 @@ func reject(w http.ResponseWriter, r *http.Request, reason, presented string, er
 	httpx.Error(w, r, err)
 }
 
-func setRateHeaders(w http.ResponseWriter, l *Limiter, remaining int, resetAt time.Time) {
+func setRateHeaders(w http.ResponseWriter, l *ratelimit.Limiter, remaining int, resetAt time.Time) {
 	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(l.Limit()))
 	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
 	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetAt.Unix(), 10))
 }
 
-func writeRateLimited(w http.ResponseWriter, r *http.Request, l *Limiter, remaining int, resetAt time.Time) {
+func writeRateLimited(w http.ResponseWriter, r *http.Request, l *ratelimit.Limiter, remaining int, resetAt time.Time) {
 	retry := int(time.Until(resetAt).Seconds())
 	if retry < 1 {
 		retry = 1

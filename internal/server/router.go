@@ -2,6 +2,8 @@
 package server
 
 import (
+	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"time"
@@ -16,7 +18,12 @@ import (
 	"github.com/edingc/roundly/internal/config"
 	"github.com/edingc/roundly/internal/course"
 	"github.com/edingc/roundly/internal/database"
+	"github.com/edingc/roundly/internal/geocode"
 	"github.com/edingc/roundly/internal/httpx"
+	"github.com/edingc/roundly/internal/mail"
+	"github.com/edingc/roundly/internal/ratelimit"
+	"github.com/edingc/roundly/internal/round"
+	"github.com/edingc/roundly/internal/stats"
 )
 
 // New builds the application handler: the JSON API under /api plus the embedded
@@ -26,29 +33,72 @@ import (
 // last-used flusher and the rate limiter's janitor. Closing it is what keeps
 // them from outliving the server, which matters most in tests, where each case
 // builds its own handler.
-func New(cfg *config.Config, db *database.DB, frontend http.Handler, stop <-chan struct{}) http.Handler {
+func New(cfg *config.Config, db *database.DB, frontend http.Handler, stop <-chan struct{}) (http.Handler, error) {
 	googleProvider := auth.NewGoogleProvider(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL)
 	tokenIssuer := auth.NewTokenIssuer(cfg.JWTSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
 
-	authService := auth.NewService(db, tokenIssuer, googleProvider, cfg.AdminEmail)
-	authHandler := auth.NewHandler(authService, googleProvider, cfg.PublicURL, cfg.IsProd())
-	courseService := course.NewService(db)
+	// A half-filled mail configuration fails the boot rather than starting an
+	// instance whose verification emails silently go nowhere. No configuration
+	// at all is not an error: it means the features that need mail stay off.
+	mailer, err := mail.New(cfg.MailConfig())
+	if err != nil {
+		return nil, fmt.Errorf("configure mail: %w", err)
+	}
+	if mailer != nil {
+		slog.Info("mail ready", "transport", mailer.Describe())
+	}
+
+	authService := auth.NewService(db, tokenIssuer, googleProvider, auth.Options{
+		AdminEmail: cfg.AdminEmail,
+		PublicURL:  cfg.PublicURL,
+		Avatars:    auth.NewAvatarSigner(cfg.JWTSecret),
+		Mailer:     mailer,
+	})
+	authHandler := auth.NewHandler(authService, googleProvider, auth.HandlerOptions{
+		PublicURL:        cfg.PublicURL,
+		Secure:           cfg.IsProd(),
+		GeocodingEnabled: cfg.GeocodingEnabled(),
+		LoginRateLimit:   cfg.LoginRateLimit,
+		LoginRateWindow:  cfg.LoginRateWindow,
+		SignupRateLimit:  cfg.SignupRateLimit,
+		SignupRateWindow: cfg.SignupRateWindow,
+	})
+	// Nil unless an operator configured a geocoder, in which case courses keep
+	// whatever coordinates were typed. The User-Agent carries this instance's
+	// public URL because the OSM usage policy asks that a client be identifiable
+	// and its operator reachable.
+	var geocoder geocode.Geocoder
+	if cfg.GeocodingEnabled() {
+		geocoder = geocode.NewNominatim(cfg.NominatimURL, "Roundly/1.0 (+"+cfg.PublicURL+")")
+	}
+
+	courseService := course.NewService(db, geocoder)
 	courseHandler := course.NewHandler(courseService, authService.RequireAdmin)
-	clubHandler := club.NewHandler(club.NewService(db))
+	roundService := round.NewService(db, courseService)
+	roundHandler := round.NewHandler(roundService)
+	statsHandler := stats.NewHandler(stats.NewService(db))
+	// The bag needs to know whether a club has been played before it will let
+	// one be deleted, which is the dependency Phase 2 predicted when it made
+	// retirement a soft delete.
+	clubHandler := club.NewHandler(club.NewService(db, roundService))
 	accountHandler := account.NewHandler(account.NewService(db, authService, courseService))
 
 	apiKeyService := apikey.NewService(db, cfg.APIKeyMaxPerUser)
 	apiKeyHandler := apikey.NewHandler(apiKeyService)
-	requestLimiter := apikey.NewLimiter(cfg.APIKeyRateLimit, cfg.APIKeyRateWindow)
+	requestLimiter := ratelimit.New(cfg.APIKeyRateLimit, cfg.APIKeyRateWindow)
 	// Failed authentications are limited by IP separately and much harder.
 	// Guessing a 256-bit token is hopeless, but each attempt still costs an
 	// indexed query on the only database connection this server has.
-	failureLimiter := apikey.NewLimiter(20, time.Minute)
+	failureLimiter := ratelimit.New(20, time.Minute)
 
 	// A key's last-used time is written off the request path, coalesced to at
 	// most one update per key per window, so that a read-only request never has
 	// to take the single write connection.
 	apiKeyService.StartFlusher(stop)
+	// Sweeps expired refresh tokens, sign-in codes, and remembered devices.
+	authService.StartJanitor(stop)
+	// Sweeps the failed-sign-in counters.
+	authHandler.StartJanitor(stop)
 	requestLimiter.StartJanitor(stop)
 	failureLimiter.StartJanitor(stop)
 
@@ -69,14 +119,23 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler, stop <-chan
 
 		// Avatars are served unauthenticated: an <img> tag cannot carry a
 		// bearer token, and the SPA holds its access token in memory only. The
-		// unguessable key in the path is what protects the image.
+		// signature and expiry on the URL are what protect the image — see
+		// auth.AvatarSigner.
 		api.Get("/avatars/{name}", accountHandler.ServeAvatar)
 
 		// The course directory, the golf bag, and the account are entirely
 		// behind authentication.
 		api.Group(func(protected chi.Router) {
 			protected.Use(authService.Middleware)
+			// Ordered after Middleware and before every domain router: an
+			// unconfirmed account holds a valid session and is still refused
+			// everything the app does. The auth routes are mounted above this
+			// group precisely so that confirming, resending, and signing out
+			// stay reachable from that state.
+			protected.Use(authService.RequireVerifiedEmail)
 			courseHandler.Register(protected)
+			roundHandler.Register(protected)
+			statsHandler.Register(protected)
 			clubHandler.Register(protected)
 			accountHandler.Register(protected)
 			apiKeyHandler.Register(protected)
@@ -99,7 +158,7 @@ func New(cfg *config.Config, db *database.DB, frontend http.Handler, stop <-chan
 		r.Handle("/*", frontend)
 	}
 
-	return r
+	return r, nil
 }
 
 func health(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +176,7 @@ func corsMiddleware(allowed []string) func(http.Handler) http.Handler {
 			if origin != "" && slices.Contains(allowed, origin) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Roundly-Device")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 				w.Header().Set("Access-Control-Max-Age", "300")
 				// Responses vary by Origin, so caches must not share them.

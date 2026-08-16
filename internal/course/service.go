@@ -5,10 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/edingc/roundly/internal/database"
 	"github.com/edingc/roundly/internal/database/sqlc"
+	"github.com/edingc/roundly/internal/geocode"
 	"github.com/edingc/roundly/internal/httpx"
 	"github.com/edingc/roundly/internal/id"
 	"github.com/edingc/roundly/internal/timex"
@@ -19,6 +21,18 @@ const DefaultHoleCount = 18
 
 // MaxHoleNumber matches the CHECK constraint on holes.hole_number.
 const MaxHoleNumber = 18
+
+// MaxTeesPerCourse bounds how many tee sets one course may carry.
+//
+// Holes are self-limiting — the hole number is checked against 1..18 and
+// duplicates are rejected — but tees had no cap at all, so a single crafted
+// payload could ask for as many rows as fit inside the 1 MiB body limit. That
+// is the only unbounded write in the app, and it is inconsistent with the
+// explicit caps the account import already applies to courses and clubs.
+//
+// Twenty-four is well past generous: a course with separate men's, women's,
+// senior, and junior markers plus a handful of combo tees is nowhere near it.
+const MaxTeesPerCourse = 24
 
 // Service implements the course directory use cases.
 //
@@ -32,15 +46,56 @@ const MaxHoleNumber = 18
 // removal-request flow and RequireAdmin.
 type Service struct {
 	db *database.DB
+	// geocoder fills latitude and longitude from the address. Nil on an
+	// instance that has not configured one, which is the default: this is the
+	// only outbound call the course directory makes, and an operator should opt
+	// into it rather than discover it in their egress logs.
+	geocoder geocode.Geocoder
 }
 
-func NewService(db *database.DB) *Service {
-	return &Service{db: db}
+func NewService(db *database.DB, geocoder geocode.Geocoder) *Service {
+	return &Service{db: db, geocoder: geocoder}
+}
+
+// resolveCoordinates returns the coordinates to store for a course.
+//
+// A point that was supplied wins untouched: this fills gaps, it never corrects
+// anybody. Clearing both fields and saving is therefore also how you ask for a
+// course to be re-placed after its address changes.
+//
+// Every failure - no geocoder, too little address to place, a lookup error, a
+// place OSM has never heard of - returns no coordinates and no error. None of
+// them is a reason to refuse to save a golf course.
+func (s *Service) resolveCoordinates(ctx context.Context, loc Location, lat, lng *float64) (*float64, *float64) {
+	if lat != nil || lng != nil {
+		return lat, lng
+	}
+	if s.geocoder == nil {
+		return nil, nil
+	}
+	address := loc.postalLine()
+	if address == "" {
+		return nil, nil
+	}
+
+	result, err := s.geocoder.Lookup(ctx, address)
+	if err != nil {
+		slog.Warn("geocode failed", "address", address, "error", err)
+		return nil, nil
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return &result.Latitude, &result.Longitude
 }
 
 // List returns a page of courses, optionally filtered by a search term matched
-// against name and address.
-func (s *Service) List(ctx context.Context, search string, limit, offset int) (*Page, error) {
+// against the name and every part of the address.
+//
+// viewerID is whose home course sorts to the top. It orders the page rather
+// than filtering it: the directory is shared, and everybody still sees every
+// course.
+func (s *Service) List(ctx context.Context, viewerID, search string, limit, offset int) (*Page, error) {
 	search = strings.TrimSpace(search)
 
 	var (
@@ -51,6 +106,7 @@ func (s *Service) List(ctx context.Context, search string, limit, offset int) (*
 
 	if search == "" {
 		rows, err = s.db.Queries.ListCourses(ctx, sqlc.ListCoursesParams{
+			UserID: viewerID,
 			Limit:  int64(limit),
 			Offset: int64(offset),
 		})
@@ -65,6 +121,7 @@ func (s *Service) List(ctx context.Context, search string, limit, offset int) (*
 		// The query lowercases the columns, so the term must be lowered to match.
 		term := strings.ToLower(search)
 		rows, err = s.db.Queries.SearchCourses(ctx, sqlc.SearchCoursesParams{
+			UserID: viewerID,
 			Query:  term,
 			Limit:  int64(limit),
 			Offset: int64(offset),
@@ -164,8 +221,8 @@ func (s *Service) detail(ctx context.Context, row sqlc.Course) (*CourseDetail, e
 
 // CreateCourseInput is the payload for creating a course.
 type CreateCourseInput struct {
-	Name         string
-	Address      *string
+	Name string
+	Location
 	Phone        *string
 	Website      *string
 	Notes        *string
@@ -208,6 +265,8 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 
 	courseID := id.New()
 	now := timex.Now()
+	loc := in.normalized()
+	latitude, longitude := s.resolveCoordinates(ctx, loc, in.Latitude, in.Longitude)
 
 	err := s.db.InTx(func(q *sqlc.Queries) error {
 		var pinned int64
@@ -217,13 +276,17 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 		if err := q.CreateCourse(ctx, sqlc.CreateCourseParams{
 			ID:           courseID,
 			Name:         strings.TrimSpace(in.Name),
-			Address:      normalizeOptional(in.Address),
+			Street:       loc.Street,
+			City:         loc.City,
+			Region:       loc.Region,
+			PostalCode:   loc.PostalCode,
+			Country:      loc.Country,
 			Phone:        normalizeOptional(in.Phone),
 			Website:      normalizeOptional(in.Website),
 			Notes:        normalizeOptional(in.Notes),
 			FacilityType: normalizeOptional(in.FacilityType),
-			Latitude:     in.Latitude,
-			Longitude:    in.Longitude,
+			Latitude:     latitude,
+			Longitude:    longitude,
 			Pinned:       pinned,
 			UploadedBy:   &creatorID,
 			CreatedAt:    now,
@@ -286,9 +349,9 @@ type ImportHoleInput struct {
 // holes from data produced by Export. If ID is set and the importer owns a
 // course with that ID, the existing course is updated in place.
 type ImportCourseInput struct {
-	ID           string
-	Name         string
-	Address      *string
+	ID   string
+	Name string
+	Location
 	Phone        *string
 	Website      *string
 	FacilityType *string
@@ -321,6 +384,13 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 	}
 
 	now := timex.Now()
+	loc := in.normalized()
+
+	// Import deliberately does not geocode. A restore can carry sixty courses,
+	// and sixty lookups at one a second is both a minute of held-open request
+	// and precisely the bulk geocoding the OSM usage policy forbids. An export
+	// file carries its own coordinates; one that does not can be re-placed a
+	// course at a time by saving it.
 
 	err := s.db.InTx(func(q *sqlc.Queries) error {
 		if update {
@@ -328,7 +398,11 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 			existing, _ := q.GetCourse(ctx, courseID)
 			if err := q.UpdateCourse(ctx, sqlc.UpdateCourseParams{
 				Name:         strings.TrimSpace(in.Name),
-				Address:      normalizeOptional(in.Address),
+				Street:       loc.Street,
+				City:         loc.City,
+				Region:       loc.Region,
+				PostalCode:   loc.PostalCode,
+				Country:      loc.Country,
 				Phone:        normalizeOptional(in.Phone),
 				Website:      normalizeOptional(in.Website),
 				Notes:        existing.Notes,
@@ -345,7 +419,11 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 			if err := q.CreateCourse(ctx, sqlc.CreateCourseParams{
 				ID:           courseID,
 				Name:         strings.TrimSpace(in.Name),
-				Address:      normalizeOptional(in.Address),
+				Street:       loc.Street,
+				City:         loc.City,
+				Region:       loc.Region,
+				PostalCode:   loc.PostalCode,
+				Country:      loc.Country,
 				Phone:        normalizeOptional(in.Phone),
 				Website:      normalizeOptional(in.Website),
 				Notes:        nil,
@@ -394,7 +472,6 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 						Front9SlopeRatingWomen:  intToInt64Ptr(tee.Front9SlopeRatingWomen),
 						Back9CourseRatingWomen:  tee.Back9CourseRatingWomen,
 						Back9SlopeRatingWomen:   intToInt64Ptr(tee.Back9SlopeRatingWomen),
-						TotalYardage:            nil,
 						DisplayOrder:            int64(order),
 						ID:                      existing.ID,
 					}); err != nil {
@@ -514,8 +591,8 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 
 // UpdateCourseInput is the payload for updating course-level fields.
 type UpdateCourseInput struct {
-	Name         string
-	Address      *string
+	Name string
+	Location
 	Phone        *string
 	Website      *string
 	Notes        *string
@@ -535,15 +612,21 @@ func (s *Service) Update(ctx context.Context, editorID, courseID string, in Upda
 	if in.Pinned {
 		pinned = 1
 	}
+	loc := in.normalized()
+	latitude, longitude := s.resolveCoordinates(ctx, loc, in.Latitude, in.Longitude)
 	if err := s.db.Queries.UpdateCourse(ctx, sqlc.UpdateCourseParams{
 		Name:         strings.TrimSpace(in.Name),
-		Address:      normalizeOptional(in.Address),
+		Street:       loc.Street,
+		City:         loc.City,
+		Region:       loc.Region,
+		PostalCode:   loc.PostalCode,
+		Country:      loc.Country,
 		Phone:        normalizeOptional(in.Phone),
 		Website:      normalizeOptional(in.Website),
 		Notes:        normalizeOptional(in.Notes),
 		FacilityType: normalizeOptional(in.FacilityType),
-		Latitude:     in.Latitude,
-		Longitude:    in.Longitude,
+		Latitude:     latitude,
+		Longitude:    longitude,
 		Pinned:       pinned,
 		UpdatedAt:    timex.Now(),
 		ID:           row.ID,
@@ -634,7 +717,6 @@ func (s *Service) UpdateTee(ctx context.Context, editorID, teeID string, in TeeI
 		Front9SlopeRatingWomen:  intToInt64Ptr(in.Front9SlopeRatingWomen),
 		Back9CourseRatingWomen:  in.Back9CourseRatingWomen,
 		Back9SlopeRatingWomen:   intToInt64Ptr(in.Back9SlopeRatingWomen),
-		TotalYardage:            row.TotalYardage,
 		DisplayOrder:            int64(order),
 		ID:                      teeID,
 	}); err != nil {
@@ -886,13 +968,18 @@ func (s *Service) loadCourse(ctx context.Context, courseID string) (sqlc.Course,
 }
 
 // touch bumps a course's updated_at after a change to one of its children.
-// A failure here is logged rather than surfaced: the user's edit did succeed,
-// and a stale timestamp is not worth failing the request over.
+//
+// A failure is logged rather than surfaced: the user's edit did succeed, and a
+// stale timestamp is not worth failing the request over. It is logged rather
+// than dropped because the only ways this fails are a vanished course or a
+// database that has stopped accepting writes, and both are worth knowing.
 func (s *Service) touch(ctx context.Context, courseID string) {
-	_ = s.db.Queries.TouchCourse(ctx, sqlc.TouchCourseParams{
+	if err := s.db.Queries.TouchCourse(ctx, sqlc.TouchCourseParams{
 		UpdatedAt: timex.Now(),
 		ID:        courseID,
-	})
+	}); err != nil {
+		slog.Warn("touch course", "course_id", courseID, "error", err)
+	}
 }
 
 func teeParams(teeID, courseID string, in TeeInput, order int) sqlc.CreateTeeParams {
@@ -913,10 +1000,7 @@ func teeParams(teeID, courseID string, in TeeInput, order int) sqlc.CreateTeePar
 		Front9SlopeRatingWomen:  intToInt64Ptr(in.Front9SlopeRatingWomen),
 		Back9CourseRatingWomen:  in.Back9CourseRatingWomen,
 		Back9SlopeRatingWomen:   intToInt64Ptr(in.Back9SlopeRatingWomen),
-		// total_yardage is derived from hole_tee_details on read, so the stored
-		// column stays null rather than holding a value that could go stale.
-		TotalYardage: nil,
-		DisplayOrder: int64(order),
+		DisplayOrder:            int64(order),
 	}
 }
 

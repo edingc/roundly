@@ -7,16 +7,28 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { api, restoreSession, setSession, setSessionExpiredHandler } from './api'
-import type { DistanceUnit, Session, User } from '../types'
+import { api, isTwoFactorChallenge, restoreSession, setSession, setSessionExpiredHandler } from './api'
+import type { DistanceUnit, Session, TwoFactorChallenge, User } from '../types'
 
 interface AuthState {
   user: User | null
   /** True until the initial session restore finishes. */
   loading: boolean
   googleEnabled: boolean
+  /** Whether this instance can place a course from its address. */
+  geocodingEnabled: boolean
+  /** Whether this instance can send mail. Two-factor and address confirmation
+   *  are both hidden when it cannot. */
+  emailEnabled: boolean
+  /** Whether an unconfirmed account is shut out of the app. */
+  emailVerificationRequired: boolean
   signUp: (email: string, password: string, displayName: string) => Promise<void>
-  logIn: (email: string, password: string) => Promise<void>
+  /**
+   * Signs in. Resolves to null when the session is live, or to the challenge
+   * standing in the way when a mailed code is needed — the caller renders the
+   * code step rather than this hook navigating on its behalf.
+   */
+  logIn: (email: string, password: string) => Promise<TwoFactorChallenge | null>
   adoptSession: (session: Session) => void
   logOut: () => Promise<void>
   refreshUser: () => Promise<void>
@@ -28,6 +40,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
   const [googleEnabled, setGoogleEnabled] = useState(false)
+  const [geocodingEnabled, setGeocodingEnabled] = useState(false)
+  const [emailEnabled, setEmailEnabled] = useState(false)
+  const [emailVerificationRequired, setEmailVerificationRequired] = useState(false)
 
   // On boot, trade the stored refresh token for a live session. This is what
   // makes a page reload keep the user signed in.
@@ -37,11 +52,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async function boot() {
       const [session, config] = await Promise.all([
         restoreSession(),
-        api.authConfig().catch(() => ({ google_enabled: false })),
+        api.authConfig().catch(() => ({
+          google_enabled: false,
+          geocoding_enabled: false,
+          email_enabled: false,
+          email_verification_required: false,
+        })),
       ])
       if (cancelled) return
       setUser(session?.user ?? null)
       setGoogleEnabled(config.google_enabled)
+      setGeocodingEnabled(config.geocoding_enabled)
+      setEmailEnabled(config.email_enabled)
+      setEmailVerificationRequired(config.email_verification_required)
       setLoading(false)
     }
 
@@ -72,7 +95,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logIn = useCallback(
     async (email: string, password: string) => {
-      adoptSession(await api.logIn(email, password))
+      const result = await api.logIn(email, password)
+      if (isTwoFactorChallenge(result)) return result
+      adoptSession(result)
+      return null
     },
     [adoptSession],
   )
@@ -93,8 +119,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo<AuthState>(
-    () => ({ user, loading, googleEnabled, signUp, logIn, adoptSession, logOut, refreshUser }),
-    [user, loading, googleEnabled, signUp, logIn, adoptSession, logOut, refreshUser],
+    () => ({
+      user,
+      loading,
+      googleEnabled,
+      geocodingEnabled,
+      emailEnabled,
+      emailVerificationRequired,
+      signUp,
+      logIn,
+      adoptSession,
+      logOut,
+      refreshUser,
+    }),
+    [
+      user,
+      loading,
+      googleEnabled,
+      geocodingEnabled,
+      emailEnabled,
+      emailVerificationRequired,
+      signUp,
+      logIn,
+      adoptSession,
+      logOut,
+      refreshUser,
+    ],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

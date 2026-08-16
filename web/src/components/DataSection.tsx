@@ -173,6 +173,7 @@ function ImportReport({ summary }: { summary: ImportSummary }) {
         <p className="font-medium">Restore complete.</p>
         <p>{line('Clubs', summary.clubs)}</p>
         <p>{line('Courses', summary.courses)}</p>
+        <p>{line('Rounds', summary.rounds)}</p>
         {filled.length > 0 && <p>Profile fields filled in: {filled.join(', ')}.</p>}
         {(summary.warnings ?? []).map((w) => (
           <p key={w}>{w}</p>

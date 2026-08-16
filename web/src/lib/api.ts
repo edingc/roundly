@@ -8,6 +8,7 @@ import type {
   ClubStatus,
   CreatedApiKey,
   DistanceUnit,
+  Gender,
   CourseDetail,
   CourseExport,
   CoursePage,
@@ -15,13 +16,33 @@ import type {
   ImportSummary,
   ProfilePayload,
   RemovalRequest,
+  Overview,
+  Round,
+  RoundHolePayload,
+  RoundPage,
+  RoundStatus,
   Session,
+  StartRoundPayload,
   Tee,
   TeePayload,
+  TrustedDevice,
+  TwoFactorChallenge,
+  TwoFactorSetup,
   User,
 } from '../types'
 
 const REFRESH_TOKEN_KEY = 'roundly.refresh_token'
+
+/**
+ * The trusted-device token, kept per browser.
+ *
+ * localStorage rather than memory because the entire point is to outlive the
+ * session: it is what stops this browser being asked for a code again next
+ * week. It is not an access credential — it never opens the account on its own,
+ * and a sign-in still needs the password — which is what makes storing it a
+ * different proposition from storing the access token.
+ */
+const DEVICE_TOKEN_KEY = 'roundly.device_token'
 
 /**
  * ApiError carries the server's error envelope so callers can show the message
@@ -40,9 +61,17 @@ export class ApiError extends Error {
     this.fields = fields ?? {}
   }
 
-  /** True when the failure was a per-field validation problem. */
+  /**
+   * True when the failure was a per-field validation problem.
+   *
+   * Keyed on the code alone. It used to also treat any error carrying `fields`
+   * as validation, which was fine until an unrelated error put something there
+   * — then its message vanished and the UI attached an error to a field that
+   * did not exist. The server now reserves `fields` for validation, and this
+   * no longer guesses.
+   */
   get isValidation(): boolean {
-    return this.code === 'validation_failed' || Object.keys(this.fields).length > 0
+    return this.code === 'validation_failed'
   }
 }
 
@@ -81,6 +110,10 @@ export function getStoredRefreshToken(): string | null {
 
 export function setSession(session: Session | null): void {
   accessToken = session?.access_token ?? null
+  // Only ever written, never cleared from here: the field is absent on every
+  // refresh, and treating absent as "forget this device" would un-trust the
+  // browser fifteen minutes after it was trusted.
+  if (session?.device_token) setStoredDeviceToken(session.device_token)
   try {
     if (session?.refresh_token) {
       localStorage.setItem(REFRESH_TOKEN_KEY, session.refresh_token)
@@ -89,6 +122,30 @@ export function setSession(session: Session | null): void {
     }
   } catch {
     // Private browsing can block storage. The session still works until reload.
+  }
+}
+
+export function getStoredDeviceToken(): string | null {
+  try {
+    return localStorage.getItem(DEVICE_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Records a device token, or clears it.
+ *
+ * Cleared when a device is forgotten from the profile screen, so this browser
+ * stops presenting a token the server has already dropped.
+ */
+export function setStoredDeviceToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem(DEVICE_TOKEN_KEY, token)
+    else localStorage.removeItem(DEVICE_TOKEN_KEY)
+  } catch {
+    // Private browsing can block storage; the user is simply asked for a code
+    // every time, which is the safe direction to fail in.
   }
 }
 
@@ -113,6 +170,8 @@ interface RequestOptions {
    * export, which is not JSON at all.
    */
   blob?: boolean
+  /** Send the stored trusted-device token, for the endpoint that lists them. */
+  deviceHeader?: boolean
 }
 
 async function parseError(response: Response): Promise<ApiError> {
@@ -141,6 +200,11 @@ async function rawRequest<T>(path: string, options: RequestOptions): Promise<T> 
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
   if (options.auth !== false && accessToken) {
     headers['Authorization'] = `Bearer ${accessToken}`
+  }
+  // Only the device list uses this, and only to mark which row is this browser.
+  if (options.deviceHeader) {
+    const deviceToken = getStoredDeviceToken()
+    if (deviceToken) headers['X-Roundly-Device'] = deviceToken
   }
 
   let body: BodyInit | undefined
@@ -236,12 +300,71 @@ export const api = {
       auth: false,
     }),
 
+  /**
+   * Signs in with a password.
+   *
+   * Returns either a Session or a TwoFactorChallenge — the password was correct
+   * in both cases. Callers discriminate on `two_factor_required`; see
+   * isTwoFactorChallenge.
+   */
   logIn: (email: string, password: string) =>
-    request<Session>('/auth/login', {
+    request<Session | TwoFactorChallenge>('/auth/login', {
       method: 'POST',
-      body: { email, password },
+      body: { email, password, device_token: getStoredDeviceToken() ?? '' },
       auth: false,
     }),
+
+  /** Finishes a login that stopped for a mailed code. */
+  verifyTwoFactor: (challengeId: string, code: string, rememberDevice: boolean) =>
+    request<Session>('/auth/two-factor/verify', {
+      method: 'POST',
+      body: { challenge_id: challengeId, code, remember_device: rememberDevice },
+      auth: false,
+    }),
+
+  /**
+   * Turns email sign-in codes on or off. Requires the current password either
+   * way. Enabling also mints the recovery sheet, which comes back in this one
+   * response and nowhere else.
+   */
+  setTwoFactor: (enabled: boolean, currentPassword: string) =>
+    request<TwoFactorSetup>('/auth/two-factor', {
+      method: 'PUT',
+      body: { enabled, current_password: currentPassword },
+    }),
+
+  /** Replaces the recovery sheet. The old codes stop working immediately. */
+  regenerateRecoveryCodes: (currentPassword: string) =>
+    request<{ recovery_codes: string[] }>('/auth/two-factor/recovery-codes', {
+      method: 'POST',
+      body: { current_password: currentPassword },
+    }),
+
+  /**
+   * Finishes a login with a recovery code, for somebody who can no longer read
+   * the address the sign-in code was sent to.
+   */
+  verifyRecoveryCode: (challengeId: string, recoveryCode: string) =>
+    request<Session>('/auth/two-factor/recovery', {
+      method: 'POST',
+      body: { challenge_id: challengeId, recovery_code: recoveryCode },
+      auth: false,
+    }),
+
+  listDevices: () => request<{ items: TrustedDevice[] }>('/auth/devices', { deviceHeader: true }),
+
+  forgetDevice: (deviceId: string) =>
+    request<void>(`/auth/devices/${deviceId}`, { method: 'DELETE' }),
+
+  /**
+   * Redeems the token from a confirmation link. Unauthenticated: the link is
+   * opened by whichever browser the mail client hands it to.
+   */
+  verifyEmail: (token: string) =>
+    request<User>('/auth/verify-email', { method: 'POST', body: { token }, auth: false }),
+
+  resendVerification: () =>
+    request<void>('/auth/verify-email/resend', { method: 'POST', body: {} }),
 
   /** Trades the one-time code from the Google redirect for a real session. */
   exchangeGoogleCode: (code: string) =>
@@ -275,6 +398,16 @@ export const api = {
   setDistanceUnit: (unit: DistanceUnit) =>
     request<User>('/auth/preferences', { method: 'PUT', body: { distance_unit: unit } }),
 
+  /**
+   * Records which published set of course ratings a player's rounds use.
+   *
+   * An empty string clears it back to unset, which is a real answer rather than
+   * a missing one: unset selects the men's ratings. Sent on its own, because
+   * omitted preferences are left alone.
+   */
+  setGender: (gender: Gender | '') =>
+    request<User>('/auth/preferences', { method: 'PUT', body: { gender } }),
+
   listCourses: (params: { q?: string; limit?: number; offset?: number } = {}) => {
     const query = new URLSearchParams()
     if (params.q) query.set('q', params.q)
@@ -288,7 +421,11 @@ export const api = {
 
   createCourse: (payload: {
     name: string
-    address?: string | null
+    street?: string | null
+    city?: string | null
+    region?: string | null
+    postal_code?: string | null
+    country?: string | null
     phone?: string | null
     website?: string | null
     notes?: string | null
@@ -304,7 +441,11 @@ export const api = {
     id: string,
     payload: {
       name: string
-      address?: string | null
+      street?: string | null
+      city?: string | null
+      region?: string | null
+      postal_code?: string | null
+      country?: string | null
       phone?: string | null
       website?: string | null
       notes?: string | null
@@ -450,6 +591,65 @@ export const api = {
       body: { resolution },
     }),
 
+  // ---- Overview ----
+
+  /**
+   * The dashboard. `rounds` is a window from the fixed set the server offers;
+   * 0 means every round.
+   */
+  overview: (rounds?: number) =>
+    request<Overview>(`/stats/overview${rounds === undefined ? '' : `?rounds=${rounds}`}`),
+
+  // ---- Rounds ----
+
+  /**
+   * Starts a round, or records a manual one. Idempotent on `id`: the offline
+   * queue retries, and a retry must not produce a second copy of the same
+   * afternoon.
+   */
+  startRound: (payload: StartRoundPayload) =>
+    request<Round>('/rounds', { method: 'POST', body: payload }),
+
+  listRounds: (params: { limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.limit !== undefined) query.set('limit', String(params.limit))
+    if (params.offset !== undefined) query.set('offset', String(params.offset))
+    const suffix = query.toString()
+    return request<RoundPage>(`/rounds${suffix ? `?${suffix}` : ''}`)
+  },
+
+  /** Rounds in one state. Several may be in progress at once, so this is a list. */
+  listRoundsByStatus: (status: RoundStatus) =>
+    request<RoundPage>(`/rounds?status=${status}`),
+
+  getRound: (roundID: string) => request<Round>(`/rounds/${roundID}`),
+
+  updateRound: (roundID: string, payload: { played_on: string; notes: string | null }) =>
+    request<Round>(`/rounds/${roundID}`, { method: 'PUT', body: payload }),
+
+  /** One hole. The live path, and safe to replay. */
+  saveRoundHole: (roundID: string, hole: RoundHolePayload) =>
+    request<Round>(`/rounds/${roundID}/holes/${hole.hole_number}`, {
+      method: 'PUT',
+      body: hole,
+    }),
+
+  /** Every hole at once. The manual path: one save for the whole grid. */
+  saveRoundHoles: (roundID: string, holes: RoundHolePayload[]) =>
+    request<Round>(`/rounds/${roundID}/holes`, { method: 'PUT', body: { holes } }),
+
+  completeRound: (roundID: string) =>
+    request<Round>(`/rounds/${roundID}/complete`, { method: 'POST', body: {} }),
+
+  abandonRound: (roundID: string) =>
+    request<Round>(`/rounds/${roundID}/abandon`, { method: 'POST', body: {} }),
+
+  /** Undoes an accidental abandon, and reopens a finished round for editing. */
+  reopenRound: (roundID: string) =>
+    request<Round>(`/rounds/${roundID}/reopen`, { method: 'POST', body: {} }),
+
+  deleteRound: (roundID: string) => request<void>(`/rounds/${roundID}`, { method: 'DELETE' }),
+
   // ---- API keys ----
 
   listApiKeys: () => request<{ keys: ApiKey[] }>('/account/keys'),
@@ -463,6 +663,18 @@ export const api = {
 
   revokeApiKey: (keyId: string) =>
     request<void>(`/account/keys/${keyId}`, { method: 'DELETE' }),
+}
+
+/**
+ * Tells the two shapes of a login response apart.
+ *
+ * A type guard rather than a status check, because both outcomes are a 200: the
+ * password was right either way, and a pending second factor is not an error.
+ */
+export function isTwoFactorChallenge(
+  result: Session | TwoFactorChallenge,
+): result is TwoFactorChallenge {
+  return 'two_factor_required' in result && result.two_factor_required
 }
 
 /**

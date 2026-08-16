@@ -28,9 +28,13 @@ build: web-build ## Build the single binary with the frontend embedded
 web-build: ## Build the frontend into web/dist
 	cd web && npm run build
 
+# The Go server reads its configuration from the environment, not from a file,
+# so `.env` has to be exported into the shell before it can see any of it. The
+# `set -a` makes every assignment in the file an export; `-` on the include is
+# not used because the file is optional and sourcing it must not fail.
 .PHONY: run
 run: ## Run the API only, for use with the Vite dev server
-	go run ./cmd/server
+	set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/server
 
 .PHONY: dev
 dev: ## Run the Vite dev server (expects `make run` in another terminal)

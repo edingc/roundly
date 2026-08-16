@@ -55,6 +55,63 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// RequireVerifiedEmail turns away a signed-in user who has not confirmed their
+// address.
+//
+// Mounted over the application's endpoints and deliberately not over the auth
+// ones: somebody in this state still has to be able to read /auth/me, ask for
+// another link, and sign out. Blocking those would leave them holding a session
+// with nowhere to take it.
+//
+// Two things pass straight through:
+//
+//   - Every request when this instance cannot send mail. Demanding a
+//     confirmation nobody can deliver would lock out every account on the
+//     instance, including ones that predate the feature.
+//
+//   - API keys. A key can only be minted from behind this very gate, so its
+//     existence is already proof the account was verified. Re-checking would
+//     add a query to every scripted request to re-establish something that
+//     cannot have changed without the key being revoked.
+func (s *Service) RequireVerifiedEmail(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if !s.EmailVerificationRequired() || IsAPIKey(ctx) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		userID, ok := UserID(ctx)
+		if !ok {
+			httpx.Error(w, r, httpx.Unauthorized("Sign in to continue."))
+			return
+		}
+
+		row, err := s.db.Queries.GetUserByID(ctx, userID)
+		if err != nil {
+			httpx.Error(w, r, httpx.Unauthorized("Your session has expired. Please sign in again."))
+			return
+		}
+		if row.EmailVerified == 0 {
+			httpx.Error(w, r, errEmailUnverified())
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// errEmailUnverified is a distinct code rather than a bare 403, because the
+// client has a specific screen for it and needs to tell it apart from every
+// other way of being refused.
+func errEmailUnverified() error {
+	return &httpx.APIError{
+		Status:  http.StatusForbidden,
+		Code:    "email_unverified",
+		Message: "Confirm your email address to continue. Check your inbox for the link, or ask for a new one.",
+	}
+}
+
 func bearerToken(r *http.Request) (string, error) {
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
 	if header == "" {

@@ -48,5 +48,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Recharts is by some distance the largest dependency and the one least
+        // likely to change. Splitting it out means shipping an app update
+        // re-downloads the app, not the chart library with it - which matters
+        // here because the service worker precaches every asset, so a changed
+        // filename is a changed download for everyone.
+        manualChunks: {
+          charts: ['recharts'],
+        },
+      },
+    },
   },
 })

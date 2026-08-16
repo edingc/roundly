@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/edingc/roundly/internal/club"
 	"github.com/edingc/roundly/internal/course"
 	"github.com/edingc/roundly/internal/database/sqlc"
 	"github.com/edingc/roundly/internal/httpx"
 	"github.com/edingc/roundly/internal/id"
+	"github.com/edingc/roundly/internal/round"
 	"github.com/edingc/roundly/internal/timex"
 )
 
@@ -60,6 +62,7 @@ type ImportSummary struct {
 	Profile       ProfileImportResult `json:"profile"`
 	Clubs         ImportCounts        `json:"clubs"`
 	Courses       ImportCounts        `json:"courses"`
+	Rounds        ImportCounts        `json:"rounds"`
 	Warnings      []string            `json:"warnings"`
 }
 
@@ -99,7 +102,193 @@ func (s *Service) Import(ctx context.Context, userID string, exp *AccountExport)
 	if err := s.importCourses(ctx, userID, exp.Courses, summary); err != nil {
 		return nil, err
 	}
+	// Rounds last, because a round names its course by the name it snapshotted,
+	// and importing the courses first means a restored round can point back at
+	// a course that now exists on this instance.
+	if err := s.importRounds(ctx, userID, exp.Rounds, summary); err != nil {
+		return nil, err
+	}
 	return summary, nil
+}
+
+// importRounds adds rounds the account does not already have.
+//
+// The identity key is (played_on, course_name), which is what a person means by
+// "the same round". The known cost: thirty-six holes at one course in one day
+// collapse to one, and the summary reports the skip. For a merge that errs
+// toward not duplicating a season every time a file is opened twice, that is
+// the right way to be wrong.
+//
+// A round is restored with its snapshots intact rather than re-read off the
+// course, because the snapshot is the record of what the course said that day.
+// Recomputing it from this instance's copy of the course would silently restate
+// the round - the exact failure the snapshot exists to prevent.
+func (s *Service) importRounds(ctx context.Context, userID string, rounds []RoundExport, summary *ImportSummary) error {
+	if len(rounds) > maxImportRounds {
+		return httpx.ValidationError(map[string]string{
+			"rounds": fmt.Sprintf("This file has %d rounds; %d is the most that can be restored at once.", len(rounds), maxImportRounds),
+		})
+	}
+
+	existing, err := s.db.Queries.ListAllRounds(ctx, userID)
+	if err != nil {
+		return httpx.Internal(fmt.Errorf("list rounds: %w", err))
+	}
+	seen := make(map[string]bool, len(existing))
+	for _, r := range existing {
+		seen[roundKey(r.PlayedOn, r.CourseName)] = true
+	}
+
+	// Club labels the other way round, so a restored round can find the club it
+	// was played with in this account's bag.
+	clubRows, err := s.db.Queries.ListClubsByUser(ctx, userID)
+	if err != nil {
+		return httpx.Internal(fmt.Errorf("list clubs: %w", err))
+	}
+	clubIDs := make(map[string]string, len(clubRows))
+	for _, c := range clubRows {
+		clubIDs[strings.ToLower(strings.TrimSpace(c.Label))] = c.ID
+	}
+
+	// Courses on this instance, so a restored round can link back to one where
+	// the name matches. A round whose course is not here keeps its snapshots and
+	// simply has no link, which is the same state a removed course leaves.
+	courseRows, err := s.db.Queries.ListCoursesByUploader(ctx, &userID)
+	if err != nil {
+		return httpx.Internal(fmt.Errorf("list courses: %w", err))
+	}
+	courseIDs := make(map[string]string, len(courseRows))
+	for _, c := range courseRows {
+		courseIDs[strings.ToLower(strings.TrimSpace(c.Name))] = c.ID
+	}
+
+	for _, r := range rounds {
+		name := strings.TrimSpace(r.CourseName)
+		label := fmt.Sprintf("%s (%s)", name, r.PlayedOn)
+		if name == "" || r.PlayedOn == "" {
+			summary.Rounds.fail(label)
+			continue
+		}
+		key := roundKey(r.PlayedOn, name)
+		if seen[key] {
+			summary.Rounds.skip(label)
+			continue
+		}
+		if err := s.restoreRound(ctx, userID, r, clubIDs, courseIDs); err != nil {
+			summary.Rounds.fail(label)
+			continue
+		}
+		seen[key] = true
+		summary.Rounds.Imported++
+	}
+	return nil
+}
+
+func (s *Service) restoreRound(
+	ctx context.Context,
+	userID string,
+	r RoundExport,
+	clubIDs, courseIDs map[string]string,
+) error {
+	if _, ok := round.ParseDate(r.PlayedOn); !ok {
+		return fmt.Errorf("invalid played_on %q", r.PlayedOn)
+	}
+	holes := r.Holes
+	if holes != 9 && holes != 18 {
+		holes = 18
+	}
+	status := r.Status
+	if status != round.StatusComplete && status != round.StatusAbandoned {
+		// An in-progress round is not worth restoring as one: the device that
+		// was playing it is gone, and a stuck round in somebody's list is worse
+		// than a finished one.
+		status = round.StatusComplete
+	}
+	var courseID *string
+	if id, ok := courseIDs[strings.ToLower(strings.TrimSpace(r.CourseName))]; ok {
+		courseID = &id
+	}
+
+	roundID := id.New()
+	now := timex.Now()
+	return s.db.InTx(func(q *sqlc.Queries) error {
+		if err := q.CreateRound(ctx, sqlc.CreateRoundParams{
+			ID:           roundID,
+			UserID:       userID,
+			CourseID:     courseID,
+			CourseName:   strings.TrimSpace(r.CourseName),
+			TeeName:      strings.TrimSpace(r.TeeName),
+			CourseRating: r.CourseRating,
+			SlopeRating:  int64Ptr(r.SlopeRating),
+			PlayedOn:     r.PlayedOn,
+			// Created in progress and then moved, because the schema requires a
+			// completed round to carry a completion time and CreateRound does
+			// not set one. Two statements in one transaction rather than a
+			// column that could drift from the status beside it.
+			Status:        round.StatusInProgress,
+			EntryMode:     round.EntryManual,
+			HolesIntended: int64(holes),
+			Nine:          r.Nine,
+			Notes:         r.Notes,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}); err != nil {
+			return fmt.Errorf("create round: %w", err)
+		}
+		for _, h := range r.HoleScores {
+			if h.HoleNumber < 1 || h.HoleNumber > 18 {
+				continue
+			}
+			var clubID *string
+			if h.TeeClubLabel != nil {
+				if id, ok := clubIDs[strings.ToLower(strings.TrimSpace(*h.TeeClubLabel))]; ok {
+					clubID = &id
+				}
+			}
+			if err := q.UpsertRoundHole(ctx, sqlc.UpsertRoundHoleParams{
+				ID:              id.New(),
+				RoundID:         roundID,
+				HoleNumber:      int64(h.HoleNumber),
+				Par:             int64Ptr(h.Par),
+				Yardage:         int64Ptr(h.Yardage),
+				StrokeIndex:     int64Ptr(h.StrokeIndex),
+				Strokes:         int64Ptr(h.Strokes),
+				Putts:           int64Ptr(h.Putts),
+				TeeClubID:       clubID,
+				TeeAccuracy:     h.TeeAccuracy,
+				FirstPuttFeet:   int64Ptr(h.FirstPuttFeet),
+				FairwayBunker:   boolToInt64(h.FairwayBunker),
+				GreensideBunker: boolToInt64(h.GreensideBunker),
+				Penalties:       int64(h.Penalties),
+				PenaltyType:     h.PenaltyType,
+			}); err != nil {
+				return fmt.Errorf("restore hole %d: %w", h.HoleNumber, err)
+			}
+		}
+
+		var completedAt *string
+		if status == round.StatusComplete {
+			completedAt = &now
+		}
+		return q.SetRoundStatus(ctx, sqlc.SetRoundStatusParams{
+			Status:      status,
+			CompletedAt: completedAt,
+			UpdatedAt:   now,
+			ID:          roundID,
+			UserID:      userID,
+		})
+	})
+}
+
+func roundKey(playedOn, courseName string) string {
+	return playedOn + "\x00" + strings.ToLower(strings.TrimSpace(courseName))
+}
+
+func boolToInt64(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // importProfile fills only the fields that are currently empty. A restore is
@@ -130,6 +319,7 @@ func (s *Service) importProfile(ctx context.Context, userID string, p ProfileExp
 	city := fill("location_city", row.LocationCity, p.LocationCity)
 	region := fill("location_region", row.LocationRegion, p.LocationRegion)
 	country := fill("location_country", row.LocationCountry, p.LocationCountry)
+	gender := fill("gender", row.Gender, p.Gender)
 
 	// The email is never imported: it is the login identity, and a file must
 	// not be able to move an account to a different address.
@@ -164,6 +354,14 @@ func (s *Service) importProfile(ctx context.Context, userID string, p ProfileExp
 	}); err != nil {
 		return httpx.Internal(fmt.Errorf("import profile: %w", err))
 	}
+
+	// Gender is a preference with its own statement, so it is restored with its
+	// own call. Same fill-only-if-empty rule as everything above.
+	if gender != nil && (row.Gender == nil || *row.Gender == "") {
+		if _, err := s.auth.SetGender(ctx, userID, gender); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -196,11 +394,26 @@ func (s *Service) importClubs(ctx context.Context, userID string, clubs []ClubEx
 	return s.db.InTx(func(q *sqlc.Queries) error {
 		for _, c := range clubs {
 			label := strings.TrimSpace(c.Label)
-			clubType := strings.ToLower(strings.TrimSpace(c.ClubType))
-			if label == "" || clubType == "" {
-				summary.Clubs.fail(label)
+			// Validated through the same rules as a club created through the
+			// API, so a hand-edited file cannot store what the app itself would
+			// refuse — the same argument importCourses makes below.
+			in, err := club.ValidateImport(club.ImportClub{
+				Type:              c.ClubType,
+				Label:             c.Label,
+				Brand:             c.Brand,
+				Model:             c.Model,
+				Loft:              c.Loft,
+				Shaft:             c.Shaft,
+				Flex:              c.Flex,
+				Notes:             c.Notes,
+				ExpectedCarry:     c.ExpectedCarry,
+				AverageDispersion: c.AverageDispersion,
+			})
+			if err != nil {
+				summary.Clubs.fail(labelOrPlaceholder(label))
 				continue
 			}
+			clubType := in.Type
 			key := clubKey(clubType, label)
 			if seen[key] {
 				summary.Clubs.skip(label)
@@ -225,15 +438,15 @@ func (s *Service) importClubs(ctx context.Context, userID string, clubs []ClubEx
 				ID:                id.New(),
 				UserID:            userID,
 				ClubType:          clubType,
-				Label:             label,
-				Brand:             c.Brand,
-				Model:             c.Model,
-				Loft:              c.Loft,
-				Shaft:             c.Shaft,
-				Flex:              c.Flex,
-				Notes:             c.Notes,
-				ExpectedCarry:     int64Ptr(c.ExpectedCarry),
-				AverageDispersion: int64Ptr(c.AverageDispersion),
+				Label:             strings.TrimSpace(in.Label),
+				Brand:             in.Brand,
+				Model:             in.Model,
+				Loft:              in.Loft,
+				Shaft:             in.Shaft,
+				Flex:              in.Flex,
+				Notes:             in.Notes,
+				ExpectedCarry:     int64Ptr(in.ExpectedCarry),
+				AverageDispersion: int64Ptr(in.AverageDispersion),
 				Active:            active,
 				RetiredAt:         retiredAt,
 				DisplayOrder:      int64(order),
@@ -301,6 +514,15 @@ func (s *Service) importCourses(ctx context.Context, userID string, courses []co
 		summary.Courses.Imported++
 	}
 	return nil
+}
+
+// labelOrPlaceholder keeps a nameless club from being reported as a blank line
+// in the import summary.
+func labelOrPlaceholder(label string) string {
+	if label == "" {
+		return "(unnamed)"
+	}
+	return label
 }
 
 func clubKey(clubType, label string) string {

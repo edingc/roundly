@@ -1,12 +1,73 @@
 package course
 
-import "github.com/edingc/roundly/internal/database/sqlc"
+import (
+	"strings"
+
+	"github.com/edingc/roundly/internal/database/sqlc"
+)
+
+// Location is where a course is, in parts.
+//
+// It replaced a single free-text address because the parts are what callers
+// actually ask for: the profile's home-course picker shows "City, Region,
+// Country" beside a name, and no amount of comma-splitting makes that reliable
+// from one string. Street stays alongside them rather than being folded in — it
+// is what puts the map pin on the clubhouse instead of the town, and it is the
+// one piece the other four cannot reconstruct.
+//
+// Embedded rather than nested, so the JSON stays flat and the wire shape is the
+// old one with `address` swapped for five siblings.
+type Location struct {
+	Street     *string `json:"street"`
+	City       *string `json:"city"`
+	Region     *string `json:"region"`
+	PostalCode *string `json:"postal_code"`
+	Country    *string `json:"country"`
+}
+
+// postalLine renders the location the way it would be written on an envelope,
+// which is the form a geocoder parses best. It mirrors formatCourseAddress in
+// web/src/lib/location.ts.
+//
+// It returns "" unless a street or a city is set. A location that is only
+// "USA" would geocode to the middle of the country, and a pin in Kansas is
+// worse than no pin: the empty string is how this says "not enough to place".
+func (l Location) postalLine() string {
+	if deref(l.Street) == "" && deref(l.City) == "" {
+		return ""
+	}
+	regionLine := joinParts(" ", l.Region, l.PostalCode)
+	return joinParts(", ", l.Street, l.City, &regionLine, l.Country)
+}
+
+// joinParts trims each part, drops the blanks, and joins what is left.
+func joinParts(separator string, parts ...*string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(deref(part)); trimmed != "" {
+			kept = append(kept, trimmed)
+		}
+	}
+	return strings.Join(kept, separator)
+}
+
+// normalized trims each part and collapses a blank one to nil, so clearing a
+// field on the form stores NULL rather than an empty string.
+func (l Location) normalized() Location {
+	return Location{
+		Street:     normalizeOptional(l.Street),
+		City:       normalizeOptional(l.City),
+		Region:     normalizeOptional(l.Region),
+		PostalCode: normalizeOptional(l.PostalCode),
+		Country:    normalizeOptional(l.Country),
+	}
+}
 
 // Course is the list representation: no tees or holes, for the index screen.
 type Course struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Address      *string  `json:"address"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Location
 	Phone        *string  `json:"phone"`
 	Website      *string  `json:"website"`
 	Notes        *string  `json:"notes"`
@@ -91,9 +152,15 @@ type Page struct {
 
 func toCourse(row sqlc.Course) Course {
 	return Course{
-		ID:           row.ID,
-		Name:         row.Name,
-		Address:      row.Address,
+		ID:   row.ID,
+		Name: row.Name,
+		Location: Location{
+			Street:     row.Street,
+			City:       row.City,
+			Region:     row.Region,
+			PostalCode: row.PostalCode,
+			Country:    row.Country,
+		},
 		Phone:        row.Phone,
 		Website:      row.Website,
 		Notes:        row.Notes,

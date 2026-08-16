@@ -33,9 +33,19 @@ const (
 	minCourseRating9 = 25.0
 	maxCourseRating9 = 45.0
 
-	// minAddressLen is a floor for a plausible street address, low enough not
+	// minStreetLen is a floor for a plausible street address, low enough not
 	// to reject a real short one, high enough to catch a stray "n/a" or "-".
-	minAddressLen = 4
+	minStreetLen = 4
+
+	// The remaining address parts are single names or codes, so they get a
+	// length cap and nothing else. A city can be one letter — Å, in Norway, is
+	// a real place with a real golf course an hour away — so there is no
+	// minimum to trip over.
+	maxStreetLen     = 240
+	maxCityLen       = 80
+	maxRegionLen     = 80
+	maxPostalCodeLen = 20
+	maxCountryLen    = 80
 )
 
 // Handler exposes the course directory endpoints.
@@ -108,7 +118,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	offset := httpx.QueryInt(r, "offset", 0, 0, 1_000_000)
 	search := r.URL.Query().Get("q")
 
-	page, err := h.service.List(ctx, search, limit, offset)
+	page, err := h.service.List(ctx, auth.MustUserID(ctx), search, limit, offset)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -145,8 +155,8 @@ type teeRequest struct {
 }
 
 type createCourseRequest struct {
-	Name         string       `json:"name"`
-	Address      *string      `json:"address"`
+	Name string `json:"name"`
+	Location
 	Phone        *string      `json:"phone"`
 	Website      *string      `json:"website"`
 	Notes        *string      `json:"notes"`
@@ -166,7 +176,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website, req.Notes, req.FacilityType, req.Latitude, req.Longitude)
+	validateCourseFields(v, req.Name, req.Location, req.Phone, req.Website, req.Notes, req.FacilityType, req.Latitude, req.Longitude)
 
 	// Nine- and eighteen-hole courses are the realistic cases, and the holes
 	// table CHECK constraint caps hole numbers at 18 either way.
@@ -175,8 +185,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tees := make([]TeeInput, 0, len(req.Tees))
-	for i, tee := range req.Tees {
-		tees = append(tees, validateTee(v, fieldPath("tees", i), tee))
+	if len(req.Tees) > MaxTeesPerCourse {
+		v.Add("tees", fmt.Sprintf("A course can have at most %d tees.", MaxTeesPerCourse))
+	} else {
+		for i, tee := range req.Tees {
+			tees = append(tees, validateTee(v, fieldPath("tees", i), tee))
+		}
 	}
 	if err := v.Err(); err != nil {
 		httpx.Error(w, r, err)
@@ -186,7 +200,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	detail, err := h.service.Create(ctx, auth.MustUserID(ctx), CreateCourseInput{
 		Name:         req.Name,
-		Address:      req.Address,
+		Location:     req.Location,
 		Phone:        req.Phone,
 		Website:      req.Website,
 		Notes:        req.Notes,
@@ -205,8 +219,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateCourseRequest struct {
-	Name         string   `json:"name"`
-	Address      *string  `json:"address"`
+	Name string `json:"name"`
+	Location
 	Phone        *string  `json:"phone"`
 	Website      *string  `json:"website"`
 	Notes        *string  `json:"notes"`
@@ -224,7 +238,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	v := httpx.NewValidator()
-	validateCourseFields(v, req.Name, req.Address, req.Phone, req.Website, req.Notes, req.FacilityType, req.Latitude, req.Longitude)
+	validateCourseFields(v, req.Name, req.Location, req.Phone, req.Website, req.Notes, req.FacilityType, req.Latitude, req.Longitude)
 	if err := v.Err(); err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -233,7 +247,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	detail, err := h.service.Update(ctx, auth.MustUserID(ctx), chi.URLParam(r, "courseID"), UpdateCourseInput{
 		Name:         req.Name,
-		Address:      req.Address,
+		Location:     req.Location,
 		Phone:        req.Phone,
 		Website:      req.Website,
 		Notes:        req.Notes,
@@ -437,10 +451,10 @@ var validFacilityTypes = map[string]bool{
 	"resort":   true,
 }
 
-func validateCourseFields(v *httpx.Validator, name string, address, phone, website, notes, facilityType *string, latitude, longitude *float64) {
+func validateCourseFields(v *httpx.Validator, name string, loc Location, phone, website, notes, facilityType *string, latitude, longitude *float64) {
 	v.Required("name", name)
 	v.MaxLen("name", strings.TrimSpace(name), 120)
-	validateAddress(v, address)
+	validateLocation(v, loc)
 	if phone != nil {
 		v.MaxLen("phone", strings.TrimSpace(*phone), 30)
 	}
@@ -477,24 +491,56 @@ func validateWebsite(v *httpx.Validator, website *string) {
 	}
 }
 
-// validateAddress checks the shape of an address rather than whether the
-// place exists: a blank value clears the field (same as address/phone
-// elsewhere), so only a non-blank value gets checked.
-func validateAddress(v *httpx.Validator, address *string) {
-	if address == nil {
-		return
+// validateLocation checks the shape of an address rather than whether the place
+// exists: a blank value clears the field (same as phone and website), so only a
+// non-blank part gets checked.
+//
+// Every part is independently optional. A course known only by its town is a
+// perfectly good directory entry, and demanding the rest would leave people
+// typing filler into fields they cannot answer.
+func validateLocation(v *httpx.Validator, loc Location) {
+	if street := strings.TrimSpace(deref(loc.Street)); street != "" {
+		v.MaxLen("street", street, maxStreetLen)
+		switch {
+		case utf8.RuneCountInString(street) < minStreetLen:
+			v.Add("street", "Enter a full street address.")
+		case !containsLetter(street):
+			v.Add("street", "Enter a valid street address.")
+		}
 	}
-	trimmed := strings.TrimSpace(*address)
+
+	// A city, region, or country made only of punctuation is a typo, so those
+	// three still have to contain a letter. A postal code does not: "49435" is
+	// entirely correct.
+	validatePlaceName(v, "city", "city", loc.City, maxCityLen)
+	validatePlaceName(v, "region", "state or province", loc.Region, maxRegionLen)
+	validatePlaceName(v, "country", "country", loc.Country, maxCountryLen)
+
+	if postal := strings.TrimSpace(deref(loc.PostalCode)); postal != "" {
+		v.MaxLen("postal_code", postal, maxPostalCodeLen)
+	}
+}
+
+// validatePlaceName checks one named part of an address. label is what the
+// error message calls it, which is not always the field name: "region" is the
+// column, but "state or province" is what the form says and what a person
+// reading the error is looking at.
+func validatePlaceName(v *httpx.Validator, field, label string, value *string, maxLen int) {
+	trimmed := strings.TrimSpace(deref(value))
 	if trimmed == "" {
 		return
 	}
-	v.MaxLen("address", trimmed, 240)
-	switch {
-	case utf8.RuneCountInString(trimmed) < minAddressLen:
-		v.Add("address", "Enter a full address.")
-	case !containsLetter(trimmed):
-		v.Add("address", "Enter a valid address.")
+	v.MaxLen(field, trimmed, maxLen)
+	if !containsLetter(trimmed) {
+		v.Add(field, "Enter a valid "+label+".")
 	}
+}
+
+func deref(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func containsLetter(s string) bool {

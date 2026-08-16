@@ -1,4 +1,11 @@
-package apikey
+// Package ratelimit is a fixed-window request counter, shared by everything in
+// this app that has to say "not that many, not that fast".
+//
+// It began inside internal/apikey and moved out when sign-in needed the same
+// thing: internal/apikey imports internal/auth, so auth could not import it
+// back. One implementation with two callers, rather than two implementations
+// that drift.
+package ratelimit
 
 import (
 	"sync"
@@ -28,7 +35,7 @@ type bucket struct {
 	count int
 }
 
-func NewLimiter(limit int, window time.Duration) *Limiter {
+func New(limit int, window time.Duration) *Limiter {
 	return &Limiter{
 		limit:   limit,
 		window:  window,
@@ -63,6 +70,25 @@ func (l *Limiter) Allow(key string, now time.Time) (ok bool, remaining int, rese
 		return false, 0, resetAt
 	}
 	return true, l.limit - b.count, resetAt
+}
+
+// Exceeded reports whether key is already over its limit, without recording an
+// attempt against it.
+//
+// The distinction from Allow matters for anything that counts only failures. A
+// sign-in has to ask "am I still allowed to try?" before it knows whether this
+// attempt is going to be one of the ones worth counting — if asking consumed
+// budget, a user typing their password correctly would spend the same
+// allowance as an attacker getting it wrong.
+func (l *Limiter) Exceeded(key string, now time.Time) (blocked bool, resetAt time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	b, found := l.buckets[key]
+	if !found || now.Sub(b.start) >= l.window {
+		return false, now.Add(l.window)
+	}
+	return b.count >= l.limit, b.start.Add(l.window)
 }
 
 // Limit is the configured ceiling, for the X-RateLimit-Limit header.

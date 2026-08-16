@@ -69,13 +69,52 @@ interface FieldProps extends InputHTMLAttributes<HTMLInputElement> {
    * in yards"), or into its `hint`.
    */
   suffix?: string
+  /**
+   * Suggestions offered as the user types, via a `<datalist>`.
+   *
+   * Deliberately not a `<select>`: a datalist suggests without constraining, so
+   * a value that is not on the list can still be typed. That is what lets the
+   * country and state fields be helpful without any of them becoming a list
+   * that goes stale or refuses a real place.
+   *
+   * `value` is what lands in the input; `label` is the longer form the browser
+   * shows beside it, so "MI" can be offered as "Michigan".
+   */
+  options?: Array<{ value: string; label?: string }>
+  /**
+   * Marks the field as one that may be left blank, by placing the word inside
+   * the input rather than in a hint underneath it.
+   *
+   * A hint is a line of prose the eye has to travel to and read; "Optional" is
+   * a property of the box, and belongs in the box. It also frees the hint line
+   * for something that is actually worth saying, and stops a column of
+   * identical "Optional" captions from adding a row of noise under every field.
+   *
+   * Nothing is added for assistive tech, and nothing needs to be: optional is
+   * the default state of an input, and it is `required` that carries the
+   * announcement. An explicit placeholder wins, so a field with real guidance
+   * to give keeps it.
+   */
+  optional?: boolean
 }
 
 /** A labelled input that wires up its own error and hint associations. */
-export function Field({ label, error, hint, suffix, id, className, ...rest }: FieldProps) {
+export function Field({
+  label,
+  error,
+  hint,
+  suffix,
+  options,
+  optional,
+  placeholder,
+  id,
+  className,
+  ...rest
+}: FieldProps) {
   const inputId = id ?? `field-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
   const errorId = `${inputId}-error`
   const hintId = `${inputId}-hint`
+  const listId = options ? `${inputId}-options` : undefined
 
   return (
     <div>
@@ -85,11 +124,22 @@ export function Field({ label, error, hint, suffix, id, className, ...rest }: Fi
       <div className="relative">
         <input
           id={inputId}
+          list={listId}
+          placeholder={placeholder ?? (optional ? 'Optional' : undefined)}
           className={cx('input', suffix && 'pr-12', error && 'input-error', className)}
           aria-invalid={error ? true : undefined}
           aria-describedby={cx(error && errorId, hint && hintId) || undefined}
           {...rest}
         />
+        {options && (
+          <datalist id={listId}>
+            {options.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </datalist>
+        )}
         {suffix && (
           <span
             aria-hidden="true"
@@ -502,6 +552,14 @@ export function PrinterIcon({ className }: { className?: string }) {
       <path strokeLinecap="round" strokeLinejoin="round" d="M7 9V4h10v5" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M7 18H5a2 2 0 01-2-2v-4a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2h-2" />
       <path strokeLinecap="round" strokeLinejoin="round" d="M7 15h10v5H7z" />
+    </svg>
+  )
+}
+
+export function HomeIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M11.3 2.8a1 1 0 011.4 0l8 7.4a1 1 0 01-.7 1.8H19v8a1 1 0 01-1 1h-4v-6h-4v6H6a1 1 0 01-1-1v-8H4a1 1 0 01-.7-1.8z" />
     </svg>
   )
 }

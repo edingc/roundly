@@ -63,7 +63,10 @@ func run() error {
 	stopBackground := make(chan struct{})
 	defer close(stopBackground)
 
-	handler := server.New(cfg, db, frontendHandler, stopBackground)
+	handler, err := server.New(cfg, db, frontendHandler, stopBackground)
+	if err != nil {
+		return err
+	}
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
@@ -83,6 +86,7 @@ func run() error {
 			"addr", cfg.Addr,
 			"env", cfg.Env,
 			"google_oauth", cfg.GoogleEnabled(),
+			"email", cfg.MailFrom != "",
 		)
 		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err

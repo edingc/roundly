@@ -9,28 +9,59 @@ import (
 )
 
 type Querier interface {
+	ConsumeEmailChallenge(ctx context.Context, arg ConsumeEmailChallengeParams) error
+	// Invalidates whatever is outstanding. Issuing a new code has to retire the old
+	// one, or every resend widens the set of codes that would be accepted.
+	ConsumeOutstandingEmailChallenges(ctx context.Context, arg ConsumeOutstandingEmailChallengesParams) error
+	// Guarded on consumed_at IS NULL so two requests racing the same code cannot
+	// both come away having spent it.
+	ConsumeRecoveryCode(ctx context.Context, arg ConsumeRecoveryCodeParams) error
 	CountActiveAPIKeys(ctx context.Context, userID string) (int64, error)
 	CountActiveClubs(ctx context.Context, userID string) (int64, error)
 	CountCourses(ctx context.Context) (int64, error)
 	// Guards against a second request for a course that already has one waiting.
 	CountPendingRemovalRequestsForCourse(ctx context.Context, courseID *string) (int64, error)
+	// Counts what has been sent to one user for one purpose since a cut-off. This
+	// is the send-side rate limit: without it, "resend the code" is an open relay
+	// pointed at somebody else's inbox.
+	CountRecentEmailChallenges(ctx context.Context, arg CountRecentEmailChallengesParams) (int64, error)
+	// Guards DELETE /clubs/{id}. A club that has been played has to keep its row,
+	// or the rounds played with it lose the only record of what was in hand.
+	CountRoundHolesByClub(ctx context.Context, teeClubID *string) (int64, error)
+	CountRounds(ctx context.Context, userID string) (int64, error)
 	CountSearchCourses(ctx context.Context, query string) (int64, error)
+	CountUnusedRecoveryCodes(ctx context.Context, userID string) (int64, error)
 	CreateAPIKey(ctx context.Context, arg CreateAPIKeyParams) error
 	CreateClub(ctx context.Context, arg CreateClubParams) error
 	CreateCourse(ctx context.Context, arg CreateCourseParams) error
 	CreateCourseRemovalRequest(ctx context.Context, arg CreateCourseRemovalRequestParams) error
+	CreateEmailChallenge(ctx context.Context, arg CreateEmailChallengeParams) error
 	CreateHole(ctx context.Context, arg CreateHoleParams) error
 	CreateOAuthAccount(ctx context.Context, arg CreateOAuthAccountParams) error
+	CreateRecoveryCode(ctx context.Context, arg CreateRecoveryCodeParams) error
 	CreateRefreshToken(ctx context.Context, arg CreateRefreshTokenParams) error
+	CreateRound(ctx context.Context, arg CreateRoundParams) error
 	CreateTee(ctx context.Context, arg CreateTeeParams) error
+	CreateTrustedDevice(ctx context.Context, arg CreateTrustedDeviceParams) error
 	CreateUser(ctx context.Context, arg CreateUserParams) error
+	// Used whenever the account's credentials change and whenever two-factor is
+	// switched off: trust granted under the old password should not survive it.
+	DeleteAllTrustedDevices(ctx context.Context, userID string) error
 	DeleteClub(ctx context.Context, id string) error
 	DeleteCourse(ctx context.Context, id string) error
+	DeleteExpiredEmailChallenges(ctx context.Context, expiresAt string) error
 	DeleteExpiredRefreshTokens(ctx context.Context, expiresAt string) error
+	DeleteExpiredTrustedDevices(ctx context.Context, expiresAt string) error
 	DeleteHole(ctx context.Context, id string) error
 	DeleteHoleTeeDetail(ctx context.Context, arg DeleteHoleTeeDetailParams) error
 	DeleteOAuthAccount(ctx context.Context, arg DeleteOAuthAccountParams) error
+	// Regenerating replaces the whole set rather than topping it up: a sheet that
+	// is partly old and partly new is one nobody can reason about.
+	DeleteRecoveryCodes(ctx context.Context, userID string) error
+	DeleteRound(ctx context.Context, arg DeleteRoundParams) error
+	DeleteRoundHole(ctx context.Context, arg DeleteRoundHoleParams) error
 	DeleteTee(ctx context.Context, id string) error
+	DeleteTrustedDevice(ctx context.Context, arg DeleteTrustedDeviceParams) error
 	// Deleting a user relies entirely on the schema: clubs, API keys, OAuth links,
 	// refresh tokens, and the avatar cascade away, and course attribution nulls
 	// itself. courses.created_by was the one reference that made this impossible,
@@ -49,17 +80,52 @@ type Querier interface {
 	GetClub(ctx context.Context, id string) (Club, error)
 	GetCourse(ctx context.Context, id string) (Course, error)
 	GetCourseRemovalRequest(ctx context.Context, id string) (CourseRemovalRequest, error)
+	GetEmailChallenge(ctx context.Context, id string) (EmailChallenge, error)
+	// The verification link carries the token itself rather than a challenge id, so
+	// this is the only lookup that starts from the hash. Two-factor never uses it:
+	// six digits are not unique enough to name a row.
+	GetEmailChallengeByCodeHash(ctx context.Context, arg GetEmailChallengeByCodeHashParams) (EmailChallenge, error)
 	GetHole(ctx context.Context, id string) (Hole, error)
 	GetHoleByNumber(ctx context.Context, arg GetHoleByNumberParams) (Hole, error)
 	GetHoleTeeDetail(ctx context.Context, arg GetHoleTeeDetailParams) (HoleTeeDetail, error)
 	GetOAuthAccountByProviderSubject(ctx context.Context, arg GetOAuthAccountByProviderSubjectParams) (OauthAccount, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
+	// Scoped by user on every read. Another player's round id returns no rows,
+	// which the service turns into a 404 rather than a 403: confirming that an id
+	// exists leaks more than the refusal is worth. Same rule as the golf bag.
+	GetRound(ctx context.Context, arg GetRoundParams) (Round, error)
 	GetTee(ctx context.Context, id string) (Tee, error)
 	GetTeeByName(ctx context.Context, arg GetTeeByNameParams) (Tee, error)
+	// Scoped to the user as well as the hash. The token is unguessable on its own,
+	// but a lookup that ignores the user would let one account's device token
+	// satisfy another account's challenge if a hash ever collided or leaked.
+	GetTrustedDevice(ctx context.Context, arg GetTrustedDeviceParams) (TrustedDevice, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
+	IncrementEmailChallengeAttempts(ctx context.Context, id string) error
 	ListAPIKeysByUser(ctx context.Context, userID string) ([]ApiKey, error)
+	// Everything a backup needs, in one pass rather than a query per round.
+	ListAllRoundHolesByUser(ctx context.Context, userID string) ([]RoundHole, error)
+	ListAllRounds(ctx context.Context, userID string) ([]Round, error)
 	ListClubsByUser(ctx context.Context, userID string) ([]Club, error)
+	// The directory's one ordering, shared by the list and the search below.
+	//
+	// The caller's home course comes first, then pinned courses, then the rest by
+	// their names. It has to happen here rather than by re-sorting a page in the
+	// client: "first" across a paginated directory means first of all of them, and
+	// a client sort can only reach the twenty-five rows it was already sent.
+	//
+	// The home course is found by joining users rather than by comparing against a
+	// bound id, because sqlc's SQLite parser does not bind parameters inside an
+	// ORDER BY at all: it emits the placeholder but leaves it out of the params
+	// struct, so the remaining arguments silently shift by one. In a JOIN condition
+	// it binds correctly, and the join costs nothing extra: it reads the same
+	// home_course_id a separate lookup would have.
+	//
+	// The join matches at most one row and takes no column from it, so the result
+	// is still a plain course row. A player with no home course matches nothing,
+	// the first ordering term is false throughout, and the order falls through to
+	// pinned.
 	ListCourses(ctx context.Context, arg ListCoursesParams) ([]Course, error)
 	// Every course this user uploaded, for the account export. Backed by
 	// idx_courses_uploaded_by.
@@ -75,12 +141,23 @@ type Querier interface {
 	// page does not have to resolve each one, and left-joined because a requester
 	// may since have deleted their account.
 	ListPendingCourseRemovalRequests(ctx context.Context) ([]ListPendingCourseRemovalRequestsRow, error)
+	ListRoundHoles(ctx context.Context, roundID string) ([]RoundHole, error)
+	ListRounds(ctx context.Context, arg ListRoundsParams) ([]Round, error)
+	// Several rounds may be open at once, so this is a list rather than a lookup.
+	// A player who abandons one to weather and starts another the next day should
+	// not have to tidy up before they can play.
+	ListRoundsByStatus(ctx context.Context, arg ListRoundsByStatusParams) ([]Round, error)
 	ListTeesByCourse(ctx context.Context, courseID string) ([]Tee, error)
 	// Uploader-scoped bulk read for the account export. Reading per course instead
 	// would cost three queries each, which on a single-connection pool turns a
 	// sixty-course export into a hundred and eighty sequential round trips.
 	// Ordering by course_id first lets the caller group in one pass.
 	ListTeesByUploader(ctx context.Context, uploadedBy *string) ([]Tee, error)
+	ListTrustedDevices(ctx context.Context, arg ListTrustedDevicesParams) ([]TrustedDevice, error)
+	// Returns the hashes to check a submitted code against. There is no lookup by
+	// hash: argon2id salts every hash, so the same code stored twice hashes
+	// differently and only a scan can match it.
+	ListUnusedRecoveryCodes(ctx context.Context, userID string) ([]RecoveryCode, error)
 	MaxClubDisplayOrder(ctx context.Context, userID string) (int64, error)
 	MaxTeeDisplayOrder(ctx context.Context, courseID string) (int64, error)
 	ResolveCourseRemovalRequest(ctx context.Context, arg ResolveCourseRemovalRequestParams) error
@@ -93,26 +170,48 @@ type Querier interface {
 	// course named "50% Off Golf" is findable, and sqlc's SQLite parser does not
 	// support the ESCAPE clause that literal LIKE matching would require.
 	// lower() gives ASCII-case-insensitive matching; callers pass a lowered term.
+	//
+	// Every part of the address is searched, not just the street, so that "marne"
+	// and "MI" both find the courses there. That is what makes the profile's
+	// home-course picker usable: people look for their club by town, not by the
+	// street it sits on.
 	SearchCourses(ctx context.Context, arg SearchCoursesParams) ([]Course, error)
 	SetClubStatus(ctx context.Context, arg SetClubStatusParams) error
+	SetRoundStatus(ctx context.Context, arg SetRoundStatusParams) error
 	SetUserAvatarKey(ctx context.Context, arg SetUserAvatarKeyParams) error
 	SetUserEmailVerified(ctx context.Context, arg SetUserEmailVerifiedParams) error
+	// Gender is a preference, not a profile field, so it has its own statement:
+	// saving a name must not be able to disturb which ratings a round records.
+	SetUserGender(ctx context.Context, arg SetUserGenderParams) error
 	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error
+	SetUserTwoFactorEmail(ctx context.Context, arg SetUserTwoFactorEmailParams) error
 	SumTeeYardage(ctx context.Context, teeID string) (int64, error)
 	TouchAPIKeyLastUsed(ctx context.Context, arg TouchAPIKeyLastUsedParams) error
 	TouchCourse(ctx context.Context, arg TouchCourseParams) error
+	TouchTrustedDevice(ctx context.Context, arg TouchTrustedDeviceParams) error
 	UpdateClub(ctx context.Context, arg UpdateClubParams) error
 	UpdateCourse(ctx context.Context, arg UpdateCourseParams) error
 	UpdateHole(ctx context.Context, arg UpdateHoleParams) error
+	// Metadata only. Holes are written through their own statement so that a stale
+	// form cannot change something the user was not looking at.
+	UpdateRound(ctx context.Context, arg UpdateRoundParams) error
 	UpdateTee(ctx context.Context, arg UpdateTeeParams) error
 	UpdateUserDisplayName(ctx context.Context, arg UpdateUserDisplayNameParams) error
 	UpdateUserDistanceUnit(ctx context.Context, arg UpdateUserDistanceUnitParams) error
 	// Changing an address always drops verification: the new one has not been
 	// proven, and carrying the old flag over would mark an unproven address
 	// verified.
+	// Clearing email_verified is part of the same statement rather than a separate
+	// call, so there is no window in which the row names a new address and still
+	// claims the old one was confirmed. Callers only have to send the new link.
 	UpdateUserEmail(ctx context.Context, arg UpdateUserEmailParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 	UpsertHoleTeeDetail(ctx context.Context, arg UpsertHoleTeeDetailParams) error
+	// The live path writes one of these per hole, and the manual path writes
+	// eighteen in a transaction. Both go through this same upsert, keyed on
+	// (round_id, hole_number), which is what makes a queued write safe to replay:
+	// the same hole sent twice is the same hole, not two.
+	UpsertRoundHole(ctx context.Context, arg UpsertRoundHoleParams) error
 	UpsertUserAvatar(ctx context.Context, arg UpsertUserAvatarParams) error
 }
 

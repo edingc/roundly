@@ -1,9 +1,21 @@
 /**
- * The user profile: identity, preferences, data, sign-in, and API access.
+ * The user profile: identity, preferences, sign-in, data, and API access.
  *
- * Replaces the old settings page. The four sections are deliberately distinct
- * cards rather than one long form, because they answer four different
- * questions and are visited for different reasons.
+ * Replaces the old settings page. The sections are deliberately distinct cards
+ * rather than one long form, because they answer different questions and are
+ * visited for different reasons.
+ *
+ * They are ordered by how often somebody comes back to them, and grouped by
+ * what a thing *does* rather than by what it looks like. The email address is
+ * the case that decides both: it reads like a profile field and behaves like a
+ * password, so it sits with the password.
+ *
+ *   1. Personal information — name, photo, home course, where you play
+ *   2. Preferences          — units, theme, labels
+ *   3. Sign-in & security   — email, password, two-factor, Google
+ *   4. Your data            — export and restore
+ *   5. API access           — personal read-only keys
+ *   6. Danger zone          — account deletion
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -11,11 +23,14 @@ import { ApiError, api, setSession } from '../lib/api'
 import { useAuth, useDistanceUnit } from '../lib/auth'
 import { usePreferences, type StrokeIndexLabel } from '../lib/preferences'
 import { useTheme, type Theme } from '../lib/theme'
-import type { CourseSummary, DistanceUnit } from '../types'
+import { countrySuggestions, regionSuggestions } from '../lib/places'
+import type { DistanceUnit, Gender } from '../types'
 import { Avatar } from '../components/Avatar'
+import { CourseSearchField, type SelectedCourse } from '../components/CourseSearchField'
 import { ApiAccessSection } from '../components/ApiAccessSection'
 import { DataSection } from '../components/DataSection'
 import { DangerZone } from '../components/DangerZone'
+import { EmailVerificationNotice, TwoFactorSection } from '../components/TwoFactorSection'
 import {
   Alert,
   Field,
@@ -41,6 +56,16 @@ const STROKE_INDEX_OPTIONS: Array<{ value: StrokeIndexLabel; label: string }> = 
  * The wording generalises if temperature or weight ever arrive, and it changes
  * nothing about the column or the conversion code.
  */
+/**
+ * Blank is a real option, not a missing one: unset means the men's ratings,
+ * which is what every round used before this field existed.
+ */
+const GENDER_OPTIONS: Array<{ value: Gender | ''; label: string }> = [
+  { value: '', label: 'Not set' },
+  { value: 'men', label: "Men's" },
+  { value: 'women', label: "Women's" },
+]
+
 const UNIT_OPTIONS: Array<{ value: DistanceUnit; label: string }> = [
   { value: 'yards', label: 'Imperial' },
   { value: 'meters', label: 'Metric' },
@@ -53,16 +78,15 @@ export default function ProfilePage() {
   const distanceUnit = useDistanceUnit()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const [courses, setCourses] = useState<CourseSummary[]>([])
-
   // Details form
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [homeCourseId, setHomeCourseId] = useState('')
+  const [homeCourse, setHomeCourse] = useState<SelectedCourse | null>(null)
   const [city, setCity] = useState('')
   const [region, setRegion] = useState('')
   const [country, setCountry] = useState('')
+  const [gender, setGender] = useState<Gender | ''>('')
   const [savingProfile, setSavingProfile] = useState(false)
   const [profileErrors, setProfileErrors] = useState<Record<string, string>>({})
   const [profileNotice, setProfileNotice] = useState<string | null>(null)
@@ -81,6 +105,7 @@ export default function ProfilePage() {
   // Units
   const [savingUnit, setSavingUnit] = useState(false)
   const [unitError, setUnitError] = useState<string | null>(null)
+  const [preferenceError, setPreferenceError] = useState<string | null>(null)
 
   // Password + Google
   const [currentPassword, setCurrentPassword] = useState('')
@@ -100,19 +125,21 @@ export default function ProfilePage() {
     setFirstName(user.first_name ?? '')
     setLastName(user.last_name ?? '')
     setDisplayName(user.display_name)
-    setHomeCourseId(user.home_course_id ?? '')
+    setHomeCourse(
+      user.home_course_id
+        ? {
+            id: user.home_course_id,
+            name: user.home_course_name ?? '',
+            location: user.home_course_location ?? '',
+          }
+        : null,
+    )
     setCity(user.location_city ?? '')
     setRegion(user.location_region ?? '')
     setCountry(user.location_country ?? '')
+    setGender(user.gender ?? '')
     setEmail(user.email)
   }, [user])
-
-  useEffect(() => {
-    api
-      .listCourses({ limit: 100 })
-      .then((page) => setCourses(page.items))
-      .catch(() => setCourses([]))
-  }, [])
 
   // The Google link flow redirects back here with ?linked=google or ?error=…
   useEffect(() => {
@@ -150,7 +177,7 @@ export default function ProfilePage() {
         display_name: displayName,
         first_name: firstName,
         last_name: lastName,
-        home_course_id: homeCourseId || null,
+        home_course_id: homeCourse?.id ?? null,
         location_city: city,
         location_region: region,
         location_country: country,
@@ -216,6 +243,23 @@ export default function ProfilePage() {
     }
   }
 
+  // Saved the moment it is touched, like every other preference on this screen,
+  // and through its own endpoint rather than the profile form above: the two are
+  // written separately so that saving a name cannot disturb which ratings a
+  // round records.
+  async function handleGenderChange(next: Gender | '') {
+    const previous = gender
+    setGender(next)
+    setPreferenceError(null)
+    try {
+      await api.setGender(next)
+      await refreshUser()
+    } catch (err) {
+      setGender(previous)
+      setPreferenceError(err instanceof ApiError ? err.message : 'Could not save that.')
+    }
+  }
+
   async function handleUnitChange(unit: DistanceUnit) {
     if (unit === distanceUnit) return
     setSavingUnit(true)
@@ -276,14 +320,11 @@ export default function ProfilePage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Profile</h1>
-        <p className="text-sm text-slate-600 dark:text-slate-400">
-          Your account, your data, and how you reach it.
-        </p>
       </div>
 
       {/* ---------- 1. Profile information ---------- */}
       <section className="space-y-4">
-        <h2 className="text-lg font-semibold">Profile information</h2>
+        <h2 className="text-lg font-semibold">Personal information</h2>
 
         <div className="card space-y-5 p-5">
           <div className="flex flex-wrap items-center gap-4">
@@ -316,8 +357,7 @@ export default function ProfilePage() {
                 )}
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                JPEG or PNG, up to 4 MB. Cropped to a square. Served from an unlisted link, so
-                anyone with that link can view it.
+                JPEG or PNG, up to 4 MB.
               </p>
             </div>
           </div>
@@ -326,6 +366,19 @@ export default function ProfilePage() {
           {profileNotice && <Alert tone="success">{profileNotice}</Alert>}
 
           <form onSubmit={handleSaveProfile} className="space-y-4">
+            {/* Display name leads because it is the only required one, and
+                the only one anybody else ever sees. First and last are the
+                optional detail underneath it. */}
+            <Field
+              id="display-name"
+              label="Display name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              error={profileErrors.display_name}
+              required
+              maxLength={80}
+            />
+
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field
                 id="first-name"
@@ -333,7 +386,7 @@ export default function ProfilePage() {
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
                 error={profileErrors.first_name}
-                hint="Optional"
+                optional
                 maxLength={60}
               />
               <Field
@@ -342,47 +395,18 @@ export default function ProfilePage() {
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
                 error={profileErrors.last_name}
-                hint="Optional"
+                optional
                 maxLength={60}
               />
             </div>
 
-            <Field
-              id="display-name"
-              label="Display name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              error={profileErrors.display_name}
-              hint="How you appear in the app. This is the only name that is required."
-              required
-              maxLength={80}
+            <CourseSearchField
+              label="Home course"
+              value={homeCourse}
+              onChange={setHomeCourse}
+              error={profileErrors.home_course_id}
+              optional
             />
-
-            <div>
-              <label htmlFor="home-course" className="label">
-                Home course
-              </label>
-              <select
-                id="home-course"
-                value={homeCourseId}
-                onChange={(e) => setHomeCourseId(e.target.value)}
-                className={cx('input', profileErrors.home_course_id && 'input-error')}
-              >
-                <option value="">Not set</option>
-                {courses.map((course) => (
-                  <option key={course.id} value={course.id}>
-                    {course.name}
-                  </option>
-                ))}
-              </select>
-              {profileErrors.home_course_id ? (
-                <p className="field-error">{profileErrors.home_course_id}</p>
-              ) : (
-                <p className="mt-1.5 text-sm text-slate-500 dark:text-slate-400">
-                  Optional. Any course in the directory.
-                </p>
-              )}
-            </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
               <Field
@@ -391,7 +415,7 @@ export default function ProfilePage() {
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
                 error={profileErrors.location_city}
-                hint="Optional"
+                optional
                 maxLength={80}
               />
               <Field
@@ -400,7 +424,8 @@ export default function ProfilePage() {
                 value={region}
                 onChange={(e) => setRegion(e.target.value)}
                 error={profileErrors.location_region}
-                hint="Optional"
+                options={regionSuggestions(country)}
+                optional
                 maxLength={80}
               />
               <Field
@@ -409,7 +434,8 @@ export default function ProfilePage() {
                 value={country}
                 onChange={(e) => setCountry(e.target.value)}
                 error={profileErrors.location_country}
-                hint="Optional"
+                options={countrySuggestions()}
+                optional
                 maxLength={80}
               />
             </div>
@@ -422,60 +448,41 @@ export default function ProfilePage() {
             </div>
           </form>
         </div>
+      </section>
 
-        {/* Email lives in its own card because changing it is a different kind
-            of act: it needs the password and it signs other devices out. */}
-        <div className="card space-y-4 p-5">
-          <div>
-            <h3 className="font-semibold">Email address</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              This is how you sign in. Changing it requires your password and signs you out
-              everywhere else.
-            </p>
-          </div>
-          {emailNotice && <Alert tone="success">{emailNotice}</Alert>}
-          <form onSubmit={handleSaveEmail} className="space-y-4">
-            <Field
-              id="account-email"
-              label="Email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              error={emailErrors.email}
-              required
-            />
-            {user?.has_password && (
-              <Field
-                id="email-password"
-                label="Current password"
-                type="password"
-                autoComplete="current-password"
-                value={emailPassword}
-                onChange={(e) => setEmailPassword(e.target.value)}
-                error={emailErrors.current_password}
-                hint="Required to change your email address."
-              />
-            )}
-            <button
-              type="submit"
-              className="btn-secondary"
-              disabled={savingEmail || email === user?.email}
-            >
-              {savingEmail ? <Spinner label="Saving" /> : 'Change email'}
-            </button>
-          </form>
-        </div>
+      {/* ---------- 2. Preferences ---------- */}
+      {/* Above sign-in because it is the section people come back to. Changing
+          a unit is routine; changing a credential is a once-a-year act, and
+          burying the routine thing under it makes the common case the long
+          scroll. */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold">Preferences</h2>
 
         <div className="card space-y-5 p-5">
-          <div>
-            <h3 className="font-semibold">Preferences</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400">
-              How the app looks and what units it reads in.
-            </p>
-          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            How the app looks, what units it reads in, and which course ratings your rounds are
+            recorded against.
+          </p>
 
           {unitError && <Alert>{unitError}</Alert>}
+          {preferenceError && <Alert>{preferenceError}</Alert>}
+
+          {/* First in the section, because it is the one preference that
+              changes what gets stored rather than only how it is displayed. */}
+          <div className="space-y-2">
+            <span className="label">Course ratings</span>
+            <SegmentedControl
+              label="Course ratings"
+              value={gender}
+              options={GENDER_OPTIONS}
+              onChange={(next) => void handleGenderChange(next)}
+            />
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Which set of published course and slope ratings your rounds are recorded against.
+              The same tee is rated separately for men and women. Left unset, rounds use the
+              men's ratings. Changing this does not alter rounds already played.
+            </p>
+          </div>
 
           <div className="space-y-2">
             <span className="label">Units</span>
@@ -509,12 +516,57 @@ export default function ProfilePage() {
         </div>
       </section>
 
-      {/* ---------- 2. Download my data ---------- */}
-      <DataSection onImported={() => void refreshUser()} />
-
-      {/* ---------- 3. Password and sign-in ---------- */}
+      {/* ---------- 3. Sign-in and security ---------- */}
+      {/* The address and the password sit together because they are the same
+          kind of thing: both are credentials, both demand the current password
+          to change, and both sign every other device out. Grouping the address
+          with the display name — which is where it used to live — grouped it by
+          what it looks like rather than by what it does. */}
       <section className="space-y-4">
-        <h2 className="text-lg font-semibold">Password &amp; sign-in</h2>
+        <h2 className="text-lg font-semibold">Sign-in &amp; security</h2>
+
+        <div className="card space-y-4 p-5">
+          <div>
+            <h3 className="font-semibold">Email address</h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              This is how you sign in. Changing it requires your password and signs you out
+              everywhere else.
+            </p>
+          </div>
+          {emailNotice && <Alert tone="success">{emailNotice}</Alert>}
+          <EmailVerificationNotice />
+          <form onSubmit={handleSaveEmail} className="space-y-4">
+            <Field
+              id="account-email"
+              label="Email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              error={emailErrors.email}
+              required
+            />
+            {user?.has_password && (
+              <Field
+                id="email-password"
+                label="Current password"
+                type="password"
+                autoComplete="current-password"
+                value={emailPassword}
+                onChange={(e) => setEmailPassword(e.target.value)}
+                error={emailErrors.current_password}
+                hint="Required to change your email address."
+              />
+            )}
+            <button
+              type="submit"
+              className="btn-secondary"
+              disabled={savingEmail || email === user?.email}
+            >
+              {savingEmail ? <Spinner label="Saving" /> : 'Change email'}
+            </button>
+          </form>
+        </div>
 
         <div className="card space-y-4 p-5">
           <div>
@@ -559,6 +611,8 @@ export default function ProfilePage() {
           </form>
         </div>
 
+        <TwoFactorSection />
+
         {googleEnabled && (
           <div className="card space-y-4 p-5">
             <div>
@@ -591,7 +645,13 @@ export default function ProfilePage() {
         )}
       </section>
 
-      {/* ---------- 4. API access ---------- */}
+      {/* ---------- 4. Download my data ---------- */}
+      {/* Moved down out of the middle of the page: it used to sit between the
+          profile and the credentials, splitting the two halves of "your
+          account" with an errand nobody runs weekly. */}
+      <DataSection onImported={() => void refreshUser()} />
+
+      {/* ---------- 5. API access ---------- */}
       <ApiAccessSection />
 
       <DangerZone />

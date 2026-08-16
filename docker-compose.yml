@@ -19,6 +19,24 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_REDIRECT_URL: ${GOOGLE_REDIRECT_URL:-}
+      # Optional: leave unset and course coordinates stay hand-typed. Setting it
+      # makes this container call out to that host on every course save.
+      NOMINATIM_URL: ${NOMINATIM_URL:-}
+      # Optional: leave unset and this instance cannot send mail, which switches
+      # off both address confirmation and email two-factor. Set MAIL_FROM plus
+      # one transport; Resend wins if both are configured.
+      MAIL_FROM: ${MAIL_FROM:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Failed sign-ins allowed per account per window; per-IP is three times it.
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-10}
+      LOGIN_RATE_WINDOW: ${LOGIN_RATE_WINDOW:-15m}
+      # Accounts creatable per address per window, successful or not.
+      SIGNUP_RATE_LIMIT: ${SIGNUP_RATE_LIMIT:-5}
+      SIGNUP_RATE_WINDOW: ${SIGNUP_RATE_WINDOW:-1h}
     volumes:
       # Named volume rather than a bind mount: SQLite's locking is unreliable
       # over some bind-mounted filesystems.

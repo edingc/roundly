@@ -279,3 +279,51 @@ func validateStatus(v *httpx.Validator, field, raw string) Status {
 		return ""
 	}
 }
+
+// ImportClub is one club as a backup file describes it.
+//
+// A separate type from clubRequest because the two are different contracts that
+// happen to overlap: this one comes from a file rather than a form, and gaining
+// a field here should not silently change what the API accepts.
+type ImportClub struct {
+	Type              string
+	Label             string
+	Brand             *string
+	Model             *string
+	Loft              *float64
+	Shaft             *string
+	Flex              *string
+	Notes             *string
+	ExpectedCarry     *int
+	AverageDispersion *int
+}
+
+// ValidateImport checks a club from a backup against the same rules the API
+// enforces, mirroring course.ValidateImport.
+//
+// It exists because the account importer wrote clubs straight to the database.
+// A hand-edited file could therefore store what the API would refuse — a club
+// type outside the list, a 900-degree loft, a flex nobody recognises, a note
+// bounded only by the request body — and the app would then render values it
+// believes cannot exist. Routing both paths through validateClub is what stops
+// the two from drifting apart, which is the same argument the course importer
+// already makes in its own comment.
+func ValidateImport(in ImportClub) (ClubInput, error) {
+	v := httpx.NewValidator()
+	out := validateClub(v, clubRequest{
+		Type:              in.Type,
+		Label:             in.Label,
+		Brand:             in.Brand,
+		Model:             in.Model,
+		Loft:              in.Loft,
+		Shaft:             in.Shaft,
+		Flex:              in.Flex,
+		Notes:             in.Notes,
+		ExpectedCarry:     in.ExpectedCarry,
+		AverageDispersion: in.AverageDispersion,
+	})
+	if err := v.Err(); err != nil {
+		return ClubInput{}, err
+	}
+	return out, nil
+}

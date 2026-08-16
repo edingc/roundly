@@ -28,29 +28,33 @@ type Club struct {
 	Shaft             *string
 	Flex              *string
 	Notes             *string
+	ExpectedCarry     *int64
+	AverageDispersion *int64
 	Active            int64
 	RetiredAt         *string
 	DisplayOrder      int64
 	CreatedAt         string
 	UpdatedAt         string
-	ExpectedCarry     *int64
-	AverageDispersion *int64
 }
 
 type Course struct {
 	ID           string
 	Name         string
-	Address      *string
-	UploadedBy   *string
-	CreatedAt    string
-	UpdatedAt    string
+	Street       *string
+	City         *string
+	Region       *string
+	PostalCode   *string
+	Country      *string
+	Latitude     *float64
+	Longitude    *float64
 	Phone        *string
 	Website      *string
 	Notes        *string
 	FacilityType *string
-	Latitude     *float64
-	Longitude    *float64
 	Pinned       int64
+	UploadedBy   *string
+	CreatedAt    string
+	UpdatedAt    string
 }
 
 type CourseRemovalRequest struct {
@@ -62,6 +66,18 @@ type CourseRemovalRequest struct {
 	CreatedAt   string
 	ResolvedAt  *string
 	Resolution  *string
+}
+
+type EmailChallenge struct {
+	ID         string
+	UserID     string
+	Purpose    string
+	Email      string
+	CodeHash   string
+	Attempts   int64
+	ExpiresAt  string
+	ConsumedAt *string
+	CreatedAt  string
 }
 
 type Hole struct {
@@ -88,6 +104,14 @@ type OauthAccount struct {
 	CreatedAt       string
 }
 
+type RecoveryCode struct {
+	ID         string
+	UserID     string
+	CodeHash   string
+	CreatedAt  string
+	ConsumedAt *string
+}
+
 type RefreshToken struct {
 	ID        string
 	UserID    string
@@ -97,6 +121,46 @@ type RefreshToken struct {
 	RevokedAt *string
 }
 
+type Round struct {
+	ID            string
+	UserID        string
+	CourseID      *string
+	CourseName    string
+	TeeID         *string
+	TeeName       string
+	TeeColor      *string
+	CourseRating  *float64
+	SlopeRating   *int64
+	PlayedOn      string
+	StartedAt     *string
+	CompletedAt   *string
+	Status        string
+	EntryMode     string
+	HolesIntended int64
+	Nine          *string
+	Notes         *string
+	CreatedAt     string
+	UpdatedAt     string
+}
+
+type RoundHole struct {
+	ID              string
+	RoundID         string
+	HoleNumber      int64
+	Par             *int64
+	Yardage         *int64
+	StrokeIndex     *int64
+	Strokes         *int64
+	Putts           *int64
+	TeeClubID       *string
+	TeeAccuracy     *string
+	FirstPuttFeet   *int64
+	FairwayBunker   int64
+	GreensideBunker int64
+	Penalties       int64
+	PenaltyType     *string
+}
+
 type Tee struct {
 	ID                      string
 	CourseID                string
@@ -104,8 +168,6 @@ type Tee struct {
 	Color                   string
 	CourseRatingMen         *float64
 	SlopeRatingMen          *int64
-	TotalYardage            *int64
-	DisplayOrder            int64
 	CourseRatingWomen       *float64
 	SlopeRatingWomen        *int64
 	Front9CourseRatingMen   *float64
@@ -116,6 +178,17 @@ type Tee struct {
 	Front9SlopeRatingWomen  *int64
 	Back9CourseRatingWomen  *float64
 	Back9SlopeRatingWomen   *int64
+	DisplayOrder            int64
+}
+
+type TrustedDevice struct {
+	ID         string
+	UserID     string
+	TokenHash  string
+	Label      *string
+	ExpiresAt  string
+	CreatedAt  string
+	LastUsedAt *string
 }
 
 type User struct {
@@ -124,8 +197,7 @@ type User struct {
 	PasswordHash    *string
 	DisplayName     string
 	EmailVerified   int64
-	CreatedAt       string
-	DistanceUnit    string
+	TwoFactorEmail  int64
 	FirstName       *string
 	LastName        *string
 	AvatarKey       *string
@@ -133,7 +205,10 @@ type User struct {
 	LocationCity    *string
 	LocationRegion  *string
 	LocationCountry *string
+	DistanceUnit    string
+	CreatedAt       string
 	UpdatedAt       string
+	Gender          *string
 }
 
 type UserAvatar struct {

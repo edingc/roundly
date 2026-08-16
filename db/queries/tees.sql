@@ -4,9 +4,9 @@ INSERT INTO tees (
     course_rating_men, slope_rating_men, course_rating_women, slope_rating_women,
     front9_course_rating_men, front9_slope_rating_men, back9_course_rating_men, back9_slope_rating_men,
     front9_course_rating_women, front9_slope_rating_women, back9_course_rating_women, back9_slope_rating_women,
-    total_yardage, display_order
+    display_order
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetTee :one
 SELECT * FROM tees WHERE id = ?;
@@ -20,7 +20,7 @@ SET name = ?, color = ?,
     course_rating_men = ?, slope_rating_men = ?, course_rating_women = ?, slope_rating_women = ?,
     front9_course_rating_men = ?, front9_slope_rating_men = ?, back9_course_rating_men = ?, back9_slope_rating_men = ?,
     front9_course_rating_women = ?, front9_slope_rating_women = ?, back9_course_rating_women = ?, back9_slope_rating_women = ?,
-    total_yardage = ?, display_order = ?
+    display_order = ?
 WHERE id = ?;
 
 -- name: DeleteTee :exec

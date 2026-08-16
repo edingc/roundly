@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/edingc/roundly/internal/database/sqlc"
 	"github.com/edingc/roundly/internal/httpx"
 	"github.com/edingc/roundly/internal/id"
+	"github.com/edingc/roundly/internal/mail"
 	"github.com/edingc/roundly/internal/timex"
 )
 
@@ -30,16 +32,62 @@ type Service struct {
 	// step with the database or be edited through the app. Empty means the
 	// instance has no administrator.
 	adminEmail string
+	// avatars signs the URLs this service hands out. Never nil: NewService
+	// substitutes a signer over an empty secret rather than let a nil check
+	// scatter through every place a user is serialised.
+	avatars *AvatarSigner
+	// mailer is nil on an instance with no mail configuration, and that nil is
+	// load-bearing: it is what switches off email verification and two-factor
+	// together. Neither feature can be half-on, because both are only as real
+	// as the ability to deliver the message.
+	mailer mail.Mailer
+	// publicURL is where the browser reaches this instance, used to build the
+	// verification link. Mail is the one place a relative path is useless.
+	publicURL string
 }
 
-func NewService(db *database.DB, tokens *TokenIssuer, google *GoogleProvider, adminEmail string) *Service {
+// Options carries the collaborators and settings a Service needs beyond its
+// database and tokens.
+//
+// A struct rather than more positional parameters: this constructor is called
+// from one place in production and two in tests, and the things it takes are
+// all optional-with-a-default. A call site that passes Options{} gets a working
+// service with every optional feature switched off, which is exactly what a
+// test wants.
+type Options struct {
+	AdminEmail string
+	// PublicURL is where the browser reaches this instance. Only mail needs it.
+	PublicURL string
+	// Avatars signs avatar URLs. Nil is allowed and yields an unusable-but-safe
+	// signer, so a test that never looks at an avatar need not build one.
+	Avatars *AvatarSigner
+	// Mailer is nil unless the operator configured one, and nil means email
+	// verification and two-factor are both off.
+	Mailer mail.Mailer
+}
+
+func NewService(db *database.DB, tokens *TokenIssuer, google *GoogleProvider, opts Options) *Service {
+	avatars := opts.Avatars
+	if avatars == nil {
+		avatars = NewAvatarSigner(nil)
+	}
 	return &Service{
 		db:         db,
 		tokens:     tokens,
 		google:     google,
-		adminEmail: httpx.NormalizeEmail(adminEmail),
+		adminEmail: httpx.NormalizeEmail(opts.AdminEmail),
+		avatars:    avatars,
+		mailer:     opts.Mailer,
+		publicURL:  strings.TrimRight(opts.PublicURL, "/"),
 	}
 }
+
+// MailEnabled reports whether this instance can send email.
+//
+// It is the switch for both features built on mail. An instance without it
+// behaves exactly as this app did before either existed: signup completes
+// immediately and nobody can turn two-factor on.
+func (s *Service) MailEnabled() bool { return s.mailer != nil }
 
 // isAdminEmail reports whether an address is the configured administrator.
 func (s *Service) isAdminEmail(email string) bool {
@@ -53,12 +101,20 @@ func (s *Service) isAdminEmail(email string) bool {
 // the signed-in person from here, and a parallel shape would drift from this
 // one within a release.
 type User struct {
-	ID            string   `json:"id"`
-	Email         string   `json:"email"`
-	DisplayName   string   `json:"display_name"`
-	EmailVerified bool     `json:"email_verified"`
-	HasPassword   bool     `json:"has_password"`
-	Providers     []string `json:"providers"`
+	ID            string `json:"id"`
+	Email         string `json:"email"`
+	DisplayName   string `json:"display_name"`
+	EmailVerified bool   `json:"email_verified"`
+	// TwoFactorEmail is opt-in and guards the password login path only. See
+	// twofactor.go for why Google sign-in is exempt.
+	TwoFactorEmail bool `json:"two_factor_email"`
+	// RecoveryCodesRemaining counts the unused codes on the sheet, so the
+	// profile can prompt for a new one before the last is spent. Zero whenever
+	// two-factor is off, and not otherwise queried: this is read on every
+	// session check, and a count nobody can act on is not worth the row scan.
+	RecoveryCodesRemaining int      `json:"recovery_codes_remaining"`
+	HasPassword            bool     `json:"has_password"`
+	Providers              []string `json:"providers"`
 	// DistanceUnit is a display preference: every distance in the database is
 	// stored in yards, and the client converts on the way in and out.
 	DistanceUnit string `json:"distance_unit"`
@@ -73,10 +129,20 @@ type User struct {
 	HomeCourseID *string `json:"home_course_id"`
 	// HomeCourseName is resolved for display so the client does not have to
 	// fetch the course just to render its name.
-	HomeCourseName  *string `json:"home_course_name"`
-	LocationCity    *string `json:"location_city"`
-	LocationRegion  *string `json:"location_region"`
-	LocationCountry *string `json:"location_country"`
+	HomeCourseName *string `json:"home_course_name"`
+	// HomeCourseLocation is the course's "City, Region, Country", resolved for
+	// the same reason and from the same row that HomeCourseName costs. Two
+	// clubs share a name often enough that the name alone does not say which
+	// one a player picked.
+	HomeCourseLocation *string `json:"home_course_location"`
+	LocationCity       *string `json:"location_city"`
+	LocationRegion     *string `json:"location_region"`
+	LocationCountry    *string `json:"location_country"`
+	// Gender selects which published set of course ratings applies to this
+	// player: men's and women's ratings are separate numbers for the same tee.
+	// Null means unset, which is treated as the men's ratings - what every round
+	// used before this field existed. Nothing else in the app reads it.
+	Gender *string `json:"gender"`
 
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -96,6 +162,43 @@ const (
 // DistanceUnits are the accepted values for User.DistanceUnit.
 var DistanceUnits = []string{UnitYards, UnitMeters}
 
+// Which set of published course ratings a player is rated against.
+//
+// Here rather than in internal/round, which is where it is used, because
+// internal/round imports this package for its auth middleware and the reverse
+// would close the cycle. It also belongs here on its own merits: it is a stored
+// preference on the user, exactly like the distance unit above it.
+const (
+	GenderMen   = "men"
+	GenderWomen = "women"
+)
+
+// Genders are the accepted values for User.Gender. Unset is also valid and
+// means the men's ratings, which is what every round used before the column
+// existed.
+var Genders = []string{GenderMen, GenderWomen}
+
+// SetGender records which published rating set applies to this player.
+//
+// A preference rather than part of the profile, and written through its own
+// statement so that saving a name can never disturb it.
+func (s *Service) SetGender(ctx context.Context, userID string, gender *string) (*User, error) {
+	if gender != nil && !slices.Contains(Genders, *gender) {
+		return nil, httpx.ValidationError(map[string]string{
+			"gender": "Choose either men's or women's ratings.",
+		})
+	}
+
+	if err := s.db.Queries.SetUserGender(ctx, sqlc.SetUserGenderParams{
+		Gender:    gender,
+		UpdatedAt: timex.Now(),
+		ID:        userID,
+	}); err != nil {
+		return nil, httpx.Internal(fmt.Errorf("update gender: %w", err))
+	}
+	return s.CurrentUser(ctx, userID)
+}
+
 // Session is what a successful login returns.
 type Session struct {
 	AccessToken  string `json:"access_token"`
@@ -103,6 +206,17 @@ type Session struct {
 	ExpiresIn    int    `json:"expires_in"`
 	TokenType    string `json:"token_type"`
 	User         *User  `json:"user"`
+	// DeviceToken is set only when a two-factor login asked to be remembered.
+	// The client stores it and sends it on later sign-ins to skip the code; it
+	// is omitted everywhere else, including from every session refresh, because
+	// a device is trusted once rather than re-trusted on a timer.
+	DeviceToken *string `json:"device_token,omitempty"`
+}
+
+// equalEmail compares two addresses the way this app treats them: normalised
+// and case-insensitive, because that is how they are stored and matched.
+func equalEmail(a, b string) bool {
+	return httpx.NormalizeEmail(a) == httpx.NormalizeEmail(b)
 }
 
 func (s *Service) toUser(ctx context.Context, row sqlc.User) (*User, error) {
@@ -124,49 +238,78 @@ func (s *Service) toUser(ctx context.Context, row sqlc.User) (*User, error) {
 
 	// Resolved only when a home course is actually set, so the common case
 	// stays at the one query this function has always cost.
-	var homeCourseName *string
+	var homeCourseName, homeCourseLocation *string
 	if row.HomeCourseID != nil && *row.HomeCourseID != "" {
 		if courseRow, err := s.db.Queries.GetCourse(ctx, *row.HomeCourseID); err == nil {
 			name := courseRow.Name
 			homeCourseName = &name
+			if where := joinPlace(courseRow.City, courseRow.Region, courseRow.Country); where != "" {
+				homeCourseLocation = &where
+			}
 		}
 		// A missing course is not an error worth failing a session check over.
 		// The FK is ON DELETE SET NULL, so this only happens in the window
 		// between a delete and the next read.
 	}
 
+	// Only meaningful when there is a second factor to recover from, and only
+	// queried then.
+	recoveryRemaining := 0
+	if row.TwoFactorEmail != 0 {
+		if count, err := s.db.Queries.CountUnusedRecoveryCodes(ctx, row.ID); err == nil {
+			recoveryRemaining = int(count)
+		}
+	}
+
 	return &User{
-		ID:              row.ID,
-		Email:           row.Email,
-		DisplayName:     row.DisplayName,
-		EmailVerified:   row.EmailVerified != 0,
-		HasPassword:     row.PasswordHash != nil && *row.PasswordHash != "",
-		Providers:       providers,
-		DistanceUnit:    unit,
-		FirstName:       row.FirstName,
-		LastName:        row.LastName,
-		AvatarURL:       AvatarURL(row.AvatarKey),
-		HomeCourseID:    row.HomeCourseID,
-		HomeCourseName:  homeCourseName,
-		LocationCity:    row.LocationCity,
-		LocationRegion:  row.LocationRegion,
-		LocationCountry: row.LocationCountry,
-		CreatedAt:       row.CreatedAt,
-		UpdatedAt:       row.UpdatedAt,
-		IsAdmin:         s.isAdminEmail(row.Email),
+		ID:                     row.ID,
+		Email:                  row.Email,
+		DisplayName:            row.DisplayName,
+		EmailVerified:          row.EmailVerified != 0,
+		TwoFactorEmail:         row.TwoFactorEmail != 0,
+		RecoveryCodesRemaining: recoveryRemaining,
+		HasPassword:            row.PasswordHash != nil && *row.PasswordHash != "",
+		Providers:              providers,
+		DistanceUnit:           unit,
+		FirstName:              row.FirstName,
+		LastName:               row.LastName,
+		AvatarURL:              s.avatars.URL(row.AvatarKey),
+		HomeCourseID:           row.HomeCourseID,
+		HomeCourseName:         homeCourseName,
+		HomeCourseLocation:     homeCourseLocation,
+		LocationCity:           row.LocationCity,
+		LocationRegion:         row.LocationRegion,
+		LocationCountry:        row.LocationCountry,
+		Gender:                 row.Gender,
+		CreatedAt:              row.CreatedAt,
+		UpdatedAt:              row.UpdatedAt,
+		IsAdmin:                s.isAdminEmail(row.Email),
 	}, nil
 }
 
-// AvatarURL builds the public path for an avatar key, or nil when the user has
-// no avatar. The key is unguessable and rotates on every upload, which is what
-// lets the served image be cached indefinitely.
-func AvatarURL(key *string) *string {
-	if key == nil || *key == "" {
-		return nil
+// joinPlace renders a course's city, region, and country as one line, skipping
+// the parts that are not set. A course with none of them returns "", which the
+// caller turns back into a null rather than an empty string.
+//
+// This lives here, small and duplicated in spirit rather than imported, because
+// internal/course already imports this package for its auth middleware and a
+// shared formatter would close the cycle.
+func joinPlace(parts ...*string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part == nil {
+			continue
+		}
+		if trimmed := strings.TrimSpace(*part); trimmed != "" {
+			kept = append(kept, trimmed)
+		}
 	}
-	url := "/api/avatars/" + *key + ".jpg"
-	return &url
+	return strings.Join(kept, ", ")
 }
+
+// Avatars returns the signer this service mints avatar URLs with, so the
+// handler that serves the image can check what this one signed.
+func (s *Service) Avatars() *AvatarSigner { return s.avatars }
 
 // SetDistanceUnit changes the unit the caller reads and enters distances in.
 // Nothing stored is rewritten — the database stays in yards.
@@ -233,11 +376,39 @@ func (s *Service) SignUp(ctx context.Context, email, password, displayName strin
 	if err != nil {
 		return nil, httpx.Internal(fmt.Errorf("reload created user: %w", err))
 	}
-	return s.issueSession(ctx, user)
+
+	// A session is issued either way, and the account is created either way.
+	// What an unconfirmed address costs is access: RequireVerifiedEmail turns
+	// the session away from everything but the confirm-and-resend endpoints
+	// until the link is opened. Signing up and then being handed no session at
+	// all would mean a user whose next step depends on which browser their mail
+	// client happens to open.
+	session, err := s.issueSession(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.MailEnabled() {
+		if err := s.SendVerificationEmail(ctx, user.ID); err != nil {
+			// Not fatal. The account exists, the session works, and the profile
+			// screen has a resend button — stranding somebody at a failed signup
+			// because a mail server hiccuped would be worse than letting them in
+			// to a state they can recover from.
+			slog.Error("send verification email at signup", "user_id", user.ID, "error", err)
+		}
+	}
+	return session, nil
 }
 
 // LogIn authenticates an email and password.
-func (s *Service) LogIn(ctx context.Context, email, password string) (*Session, error) {
+//
+// deviceToken is whatever the client kept from a previous two-factor login, or
+// empty. It never grants access on its own: the password is checked first and
+// unconditionally, and this only decides whether a second factor is also asked
+// for.
+//
+// The result holds a session or a challenge, never both and never neither.
+func (s *Service) LogIn(ctx context.Context, email, password, deviceToken string) (*LoginResult, error) {
 	email = httpx.NormalizeEmail(email)
 
 	user, err := s.db.Queries.GetUserByEmail(ctx, email)
@@ -252,6 +423,17 @@ func (s *Service) LogIn(ctx context.Context, email, password string) (*Session, 
 
 	if user.PasswordHash == nil || *user.PasswordHash == "" {
 		_ = VerifyPassword(password, dummyHash)
+		// This message is returned whatever password was supplied, so it tells
+		// anyone who asks that the address is registered and Google-only. That
+		// is account enumeration, and it sits one line below a dummy hash whose
+		// entire job is to stop a missing account being detectable by timing —
+		// an inconsistency worth seeing rather than tripping over.
+		//
+		// Kept on purpose. The alternative is a flat "that combination is not
+		// correct" for somebody who signed up with Google and does not remember
+		// doing so, which is a real person at a dead end to protect a fact that
+		// is not sensitive on a golf app. See "Accepted, not gaps" in
+		// docs/BUILD_SPEC.md for when that reasoning stops holding.
 		return nil, httpx.Unauthorized(
 			"This account signs in with Google. Use \"Continue with Google\", then set a password from account settings if you want one.")
 	}
@@ -263,7 +445,21 @@ func (s *Service) LogIn(ctx context.Context, email, password string) (*Session, 
 		return nil, httpx.Internal(fmt.Errorf("verify password for user %s: %w", user.ID, err))
 	}
 
-	return s.issueSession(ctx, user)
+	// Checked only after the password, so a device token cannot be probed by
+	// anyone who does not already hold the password for the account it names.
+	if s.twoFactorEnabled(user) && !s.deviceTrusted(ctx, user.ID, deviceToken) {
+		challenge, err := s.startTwoFactor(ctx, user)
+		if err != nil {
+			return nil, err
+		}
+		return &LoginResult{Challenge: challenge}, nil
+	}
+
+	session, err := s.issueSession(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	return &LoginResult{Session: session}, nil
 }
 
 // Refresh rotates a refresh token, returning a new session.
@@ -551,6 +747,13 @@ func (s *Service) SetPassword(ctx context.Context, userID, currentPassword, newP
 	}); err != nil {
 		return httpx.Internal(fmt.Errorf("set password hash: %w", err))
 	}
+
+	// A new password retires every remembered device. Trust to skip the second
+	// factor was granted to a browser that proved it knew the old password, and
+	// the usual reason to change one is that somebody else learned it.
+	if err := s.ForgetAllDevices(ctx, userID); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -599,11 +802,6 @@ func (s *Service) revokeAllForUser(ctx context.Context, userID string) error {
 		return fmt.Errorf("revoke all refresh tokens for user %s: %w", userID, err)
 	}
 	return nil
-}
-
-// PurgeExpiredTokens deletes refresh tokens past their expiry.
-func (s *Service) PurgeExpiredTokens(ctx context.Context) error {
-	return s.db.Queries.DeleteExpiredRefreshTokens(ctx, timex.Now())
 }
 
 // RevokeAllSessions signs a user out everywhere. Exported for the account

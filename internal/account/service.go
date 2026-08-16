@@ -138,6 +138,28 @@ func (s *Service) ChangeEmail(ctx context.Context, userID, email, currentPasswor
 	if err := s.auth.RevokeAllSessions(ctx, userID); err != nil {
 		return nil, err
 	}
+	// Remembered devices go with the sessions. Trust to skip the second factor
+	// was granted against the old address, and the code now goes somewhere else.
+	if err := s.auth.ForgetAllDevices(ctx, userID); err != nil {
+		return nil, err
+	}
+
+	// The new address has been typed by somebody holding a session, which is not
+	// the same as somebody who can read it, so it starts unconfirmed and gets a
+	// link — otherwise changing your email would be a way around ever confirming
+	// one. UpdateUserEmail above already cleared the flag as part of the same
+	// statement; only the link is left to send.
+	//
+	// A send failure is logged rather than returned: the address has already
+	// changed, the caller is about to be handed a working session, and the
+	// profile screen has a resend button. Failing here would report an error for
+	// something that did in fact happen.
+	if s.auth.MailEnabled() {
+		if err := s.auth.SendVerificationEmail(ctx, userID); err != nil {
+			slog.Error("send verification after email change", "user_id", userID, "error", err)
+		}
+	}
+
 	return s.auth.IssueSessionFor(ctx, userID)
 }
 

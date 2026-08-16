@@ -2,12 +2,16 @@ package course
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/edingc/roundly/internal/database"
 	"github.com/edingc/roundly/internal/database/sqlc"
+	"github.com/edingc/roundly/internal/geocode"
 	"github.com/edingc/roundly/internal/httpx"
 	"github.com/edingc/roundly/internal/id"
 	"github.com/edingc/roundly/internal/timex"
@@ -22,7 +26,7 @@ func newTestService(t *testing.T) (*Service, *database.DB) {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	return NewService(db), db
+	return NewService(db, nil), db
 }
 
 // courses.uploaded_by is a foreign key, so tests need real user rows.
@@ -62,9 +66,9 @@ func TestCreateCourseGeneratesHolesAndTees(t *testing.T) {
 	owner := createUser(t, db, "owner@example.com")
 
 	detail, err := svc.Create(ctx, owner, CreateCourseInput{
-		Name:    "  Pebble Ridge  ",
-		Address: ptr("  1 Fairway Dr  "),
-		Phone:   ptr("  (555) 123-4567  "),
+		Name:     "  Pebble Ridge  ",
+		Location: Location{Street: ptr("  1 Fairway Dr  "), City: ptr("  Marne  "), Region: ptr(" MI "), PostalCode: ptr(" 49435 "), Country: ptr(" USA ")},
+		Phone:    ptr("  (555) 123-4567  "),
 		Tees: []TeeInput{
 			{
 				Name: "Championship", Color: "#FFD700",
@@ -85,8 +89,20 @@ func TestCreateCourseGeneratesHolesAndTees(t *testing.T) {
 	if detail.Name != "Pebble Ridge" {
 		t.Errorf("name = %q, want it trimmed", detail.Name)
 	}
-	if detail.Address == nil || *detail.Address != "1 Fairway Dr" {
-		t.Errorf("address = %v, want it trimmed", detail.Address)
+	for _, part := range []struct {
+		field string
+		got   *string
+		want  string
+	}{
+		{"street", detail.Street, "1 Fairway Dr"},
+		{"city", detail.City, "Marne"},
+		{"region", detail.Region, "MI"},
+		{"postal_code", detail.PostalCode, "49435"},
+		{"country", detail.Country, "USA"},
+	} {
+		if part.got == nil || *part.got != part.want {
+			t.Errorf("%s = %v, want it trimmed to %q", part.field, part.got, part.want)
+		}
 	}
 	if detail.Phone == nil || *detail.Phone != "(555) 123-4567" {
 		t.Errorf("phone = %v, want it trimmed", detail.Phone)
@@ -392,7 +408,7 @@ func TestCourseSurvivesItsUploader(t *testing.T) {
 
 	// The whole list is the risk here, not just this row: uploaded_by is scanned
 	// into a *string, and getting that wrong fails every row in the page.
-	page, err := svc.List(ctx, "", 25, 0)
+	page, err := svc.List(ctx, "", "", 25, 0)
 	if err != nil {
 		t.Fatalf("list courses after the uploader left: %v", err)
 	}
@@ -531,15 +547,15 @@ func TestDeleteCourseCascades(t *testing.T) {
 	}
 }
 
-func TestSearchMatchesNameAndAddressLiterally(t *testing.T) {
+func TestSearchMatchesNameAndLocationLiterally(t *testing.T) {
 	svc, db := newTestService(t)
 	ctx := context.Background()
 	owner := createUser(t, db, "owner@example.com")
 
 	for _, c := range []CreateCourseInput{
-		{Name: "Pebble Ridge", Address: ptr("Springfield")},
-		{Name: "Cypress Dunes", Address: ptr("Shelbyville")},
-		{Name: "50% Off Golf", Address: nil},
+		{Name: "Pebble Ridge", Location: Location{Street: ptr("1 Fairway Dr"), City: ptr("Springfield"), Region: ptr("MO"), PostalCode: ptr("65801"), Country: ptr("USA")}},
+		{Name: "Cypress Dunes", Location: Location{City: ptr("Shelbyville"), Region: ptr("KY")}},
+		{Name: "50% Off Golf"},
 	} {
 		if _, err := svc.Create(ctx, owner, c); err != nil {
 			t.Fatalf("create %q: %v", c.Name, err)
@@ -553,7 +569,14 @@ func TestSearchMatchesNameAndAddressLiterally(t *testing.T) {
 		{"pebble", 1},
 		{"PEBBLE", 1}, // case-insensitive
 		{"ridge", 1},  // mid-string
+		{"fairway", 1},
+		// Every part of the address is searchable, which is what lets the home
+		// course picker find a club by the town it is in.
 		{"springfield", 1},
+		{"shelbyville", 1},
+		{"mo", 1},
+		{"65801", 1},
+		{"usa", 1},
 		{"50%", 1}, // a literal % must not act as a wildcard
 		{"%", 1},   // matches only the course whose name contains "%"
 		{"nonexistent", 0},
@@ -561,13 +584,79 @@ func TestSearchMatchesNameAndAddressLiterally(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		page, err := svc.List(ctx, tc.term, 25, 0)
+		page, err := svc.List(ctx, "", tc.term, 25, 0)
 		if err != nil {
 			t.Fatalf("search %q: %v", tc.term, err)
 		}
 		if page.Total != tc.want {
 			t.Errorf("search %q: total = %d, want %d", tc.term, page.Total, tc.want)
 		}
+	}
+}
+
+// The directory's ordering is per viewer: your home course first, then the
+// pinned ones, then everything by name. It has to be the query's job rather
+// than the client's, because "first" has to mean first of the whole directory
+// and not first of whichever page happened to be fetched.
+func TestListPutsTheViewersHomeCourseFirst(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+	stranger := createUser(t, db, "stranger@example.com")
+
+	var homeCourseID string
+	for _, c := range []CreateCourseInput{
+		{Name: "Alpha GC"},
+		{Name: "Zulu GC", Pinned: true},
+		{Name: "Marne GC"},
+	} {
+		detail, err := svc.Create(ctx, owner, c)
+		if err != nil {
+			t.Fatalf("create %q: %v", c.Name, err)
+		}
+		if c.Name == "Marne GC" {
+			homeCourseID = detail.ID
+		}
+	}
+	if _, err := db.Exec("UPDATE users SET home_course_id = ? WHERE id = ?", homeCourseID, owner); err != nil {
+		t.Fatalf("set home course: %v", err)
+	}
+
+	names := func(viewerID string) []string {
+		t.Helper()
+		page, err := svc.List(ctx, viewerID, "", 25, 0)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		out := make([]string, 0, len(page.Items))
+		for _, item := range page.Items {
+			out = append(out, item.Name)
+		}
+		return out
+	}
+
+	// Home first, then the pinned course, then the rest by name.
+	got := names(owner)
+	want := []string{"Marne GC", "Zulu GC", "Alpha GC"}
+	if !slices.Equal(got, want) {
+		t.Errorf("owner's order = %v, want %v", got, want)
+	}
+
+	// Nobody else's list is reordered by it: the home course drops back to its
+	// name position behind the pinned one.
+	got = names(stranger)
+	want = []string{"Zulu GC", "Alpha GC", "Marne GC"}
+	if !slices.Equal(got, want) {
+		t.Errorf("stranger's order = %v, want %v", got, want)
+	}
+
+	// A search is ordered the same way.
+	page, err := svc.List(ctx, owner, "gc", 25, 0)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(page.Items) != 3 || page.Items[0].Name != "Marne GC" {
+		t.Errorf("search order = %v, want the home course first", page.Items)
 	}
 }
 
@@ -582,7 +671,7 @@ func TestListPaginates(t *testing.T) {
 		}
 	}
 
-	first, err := svc.List(ctx, "", 2, 0)
+	first, err := svc.List(ctx, "", "", 2, 0)
 	if err != nil {
 		t.Fatalf("list page 1: %v", err)
 	}
@@ -593,7 +682,7 @@ func TestListPaginates(t *testing.T) {
 		t.Errorf("first item = %q, want A GC (sorted by name)", first.Items[0].Name)
 	}
 
-	second, err := svc.List(ctx, "", 2, 2)
+	second, err := svc.List(ctx, "", "", 2, 2)
 	if err != nil {
 		t.Fatalf("list page 2: %v", err)
 	}
@@ -717,8 +806,8 @@ func TestImportRecreatesTeesAndHoleDetails(t *testing.T) {
 	owner := createUser(t, db, "owner@example.com")
 
 	imported, err := svc.Import(ctx, owner, ImportCourseInput{
-		Name:    "  Imported GC  ",
-		Address: ptr("1 Fairway Dr"),
+		Name:     "  Imported GC  ",
+		Location: Location{Street: ptr("1 Fairway Dr")},
 		Tees: []TeeInput{
 			{Name: "Back", Color: "#000000", CourseRatingMen: ptr(72.4), SlopeRatingMen: ptr(135)},
 			{Name: "Forward", Color: "#FFFFFF"},
@@ -777,30 +866,108 @@ func TestImportRecreatesTeesAndHoleDetails(t *testing.T) {
 	}
 }
 
-// validateAddress checks shape, not whether the place exists: it should catch
-// obvious junk without rejecting a short-but-real address.
-func TestValidateAddressRejectsJunk(t *testing.T) {
+// validateLocation checks shape, not whether the place exists: it should catch
+// obvious junk without rejecting a short-but-real address. Every part is
+// independently optional, so a course known only by its town still validates.
+func TestValidateLocationRejectsJunk(t *testing.T) {
 	cases := []struct {
 		name    string
-		address *string
+		loc     Location
 		wantErr bool
 	}{
-		{"not provided", nil, false},
-		{"blank clears the field", ptr(""), false},
-		{"whitespace-only clears the field", ptr("   "), false},
-		{"a real address passes", ptr("1600 Pennsylvania Ave"), false},
-		{"a short real address passes", ptr("221B Baker St"), false},
-		{"too short", ptr("12"), true},
-		{"digits only, no street name", ptr("12345"), true},
+		{"nothing provided", Location{}, false},
+		{"blank clears the field", Location{Street: ptr(""), City: ptr("")}, false},
+		{"whitespace-only clears the field", Location{Street: ptr("   ")}, false},
+		{"a real address passes", Location{Street: ptr("1600 Pennsylvania Ave")}, false},
+		{"a short real street passes", Location{Street: ptr("221B Baker St")}, false},
+		{"street too short", Location{Street: ptr("12")}, true},
+		{"street of digits only, no name", Location{Street: ptr("12345")}, true},
+		{"city alone is a complete location", Location{City: ptr("Marne")}, false},
+		{"a one-letter city passes", Location{City: ptr("Å")}, false},
+		{"punctuation is not a city", Location{City: ptr("--")}, true},
+		{"punctuation is not a region", Location{Region: ptr("-")}, true},
+		{"punctuation is not a country", Location{Country: ptr(".")}, true},
+		{"a postal code may be all digits", Location{PostalCode: ptr("49435")}, false},
+		{"a postal code may have a space", Location{PostalCode: ptr("N1A 2B3")}, false},
+		{"an over-long postal code fails", Location{PostalCode: ptr("012345678901234567890")}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			v := httpx.NewValidator()
-			validateAddress(v, tc.address)
+			validateLocation(v, tc.loc)
 			if got := !v.Valid(); got != tc.wantErr {
-				t.Errorf("validateAddress(%v): rejected = %v, want %v", tc.address, got, tc.wantErr)
+				t.Errorf("validateLocation(%+v): rejected = %v, want %v", tc.loc, got, tc.wantErr)
 			}
 		})
+	}
+}
+
+// Files written before format 4 carry one `address` line instead of the five
+// location fields. Those files are in users' hands, so importing one has to
+// keep the address rather than drop it on the floor: it lands in `street`,
+// which is where an unsplittable address line already lives.
+func TestImportReadsPreV4AddressIntoStreet(t *testing.T) {
+	in, err := ValidateImport(CourseExport{
+		FormatVersion: 3,
+		Name:          "Legacy GC",
+		Address:       ptr("1 Fairway Dr, Marne, MI 49435"),
+	})
+	if err != nil {
+		t.Fatalf("validate import: %v", err)
+	}
+	if in.Street == nil || *in.Street != "1 Fairway Dr, Marne, MI 49435" {
+		t.Errorf("street = %v, want the old address line", in.Street)
+	}
+
+	// A current file names street directly, and its own value wins.
+	in, err = ValidateImport(CourseExport{
+		FormatVersion: courseExportFormatVersion,
+		Name:          "Current GC",
+		Location:      Location{Street: ptr("2 Fairway Dr"), City: ptr("Marne")},
+		Address:       ptr("should be ignored"),
+	})
+	if err != nil {
+		t.Fatalf("validate import: %v", err)
+	}
+	if in.Street == nil || *in.Street != "2 Fairway Dr" {
+		t.Errorf("street = %v, want 2 Fairway Dr", in.Street)
+	}
+	if in.City == nil || *in.City != "Marne" {
+		t.Errorf("city = %v, want Marne", in.City)
+	}
+}
+
+// The export a course produces must not carry the legacy `address` key at all,
+// so a file round-tripped through this server stops re-seeding it.
+func TestExportOmitsLegacyAddress(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	detail, err := svc.Create(ctx, owner, CreateCourseInput{
+		Name:     "Pebble Ridge",
+		Location: Location{Street: ptr("1 Fairway Dr"), City: ptr("Marne")},
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+
+	encoded, err := json.Marshal(buildExport(detail))
+	if err != nil {
+		t.Fatalf("marshal export: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal export: %v", err)
+	}
+	if _, ok := decoded["address"]; ok {
+		t.Errorf("export still carries an `address` key: %s", encoded)
+	}
+	if decoded["street"] != "1 Fairway Dr" {
+		t.Errorf("street = %v, want 1 Fairway Dr", decoded["street"])
+	}
+	if decoded["format_version"] != float64(courseExportFormatVersion) {
+		t.Errorf("format_version = %v, want %d", decoded["format_version"], courseExportFormatVersion)
 	}
 }
 
@@ -814,9 +981,9 @@ func TestImportUpdatesExistingCourse(t *testing.T) {
 
 	// Create a course via import (simulating a first import).
 	original, err := svc.Import(ctx, owner, ImportCourseInput{
-		Name:    "Original Name",
-		Address: ptr("100 Main St"),
-		Phone:   ptr("555-0000"),
+		Name:     "Original Name",
+		Location: Location{Street: ptr("100 Main St")},
+		Phone:    ptr("555-0000"),
 		Tees: []TeeInput{
 			{Name: "Back", Color: "#000000", CourseRatingMen: ptr(72.0), SlopeRatingMen: ptr(130)},
 			{Name: "Forward", Color: "#FFFFFF"},
@@ -851,10 +1018,10 @@ func TestImportUpdatesExistingCourse(t *testing.T) {
 	// Re-import with the same ID but changed values: rename, change par,
 	// remove a tee, remove a hole, add a new hole.
 	updated, err := svc.Import(ctx, owner, ImportCourseInput{
-		ID:      original.ID,
-		Name:    "Updated Name",
-		Address: ptr("200 New Ave"),
-		Phone:   ptr("555-1111"),
+		ID:       original.ID,
+		Name:     "Updated Name",
+		Location: Location{Street: ptr("200 New Ave"), City: ptr("Marne")},
+		Phone:    ptr("555-1111"),
 		Tees: []TeeInput{
 			{Name: "Back", Color: "#000000", CourseRatingMen: ptr(73.5), SlopeRatingMen: ptr(135)},
 			{Name: "Forward", Color: "#FFFFFF"},
@@ -899,8 +1066,11 @@ func TestImportUpdatesExistingCourse(t *testing.T) {
 	if updated.Name != "Updated Name" {
 		t.Errorf("name = %q, want Updated Name", updated.Name)
 	}
-	if updated.Address == nil || *updated.Address != "200 New Ave" {
-		t.Errorf("address = %v, want 200 New Ave", updated.Address)
+	if updated.Street == nil || *updated.Street != "200 New Ave" {
+		t.Errorf("street = %v, want 200 New Ave", updated.Street)
+	}
+	if updated.City == nil || *updated.City != "Marne" {
+		t.Errorf("city = %v, want Marne", updated.City)
 	}
 
 	// Tees: "ToRemove" gone, "Back" rating updated.
@@ -954,7 +1124,7 @@ func TestImportUpdatesExistingCourse(t *testing.T) {
 	}
 
 	// Verify only one course exists.
-	page, err := svc.List(ctx, "", 100, 0)
+	page, err := svc.List(ctx, "", "", 100, 0)
 	if err != nil {
 		t.Fatalf("list courses: %v", err)
 	}
@@ -1015,11 +1185,209 @@ func TestImportUpdatesAnExistingCourseWhoeverUploadedIt(t *testing.T) {
 		t.Errorf("uploaded_by = %v, want it unchanged at the original uploader", imported.UploadedBy)
 	}
 
-	page, err := svc.List(ctx, "", 100, 0)
+	page, err := svc.List(ctx, "", "", 100, 0)
 	if err != nil {
 		t.Fatalf("list courses: %v", err)
 	}
 	if page.Total != 1 {
 		t.Errorf("total courses = %d, want 1 (updated, not forked)", page.Total)
+	}
+}
+
+// fakeGeocoder records what it was asked and answers with whatever it was told
+// to, so the service's rules can be tested without a network.
+type fakeGeocoder struct {
+	result  *geocode.Result
+	err     error
+	queries []string
+}
+
+func (f *fakeGeocoder) Lookup(_ context.Context, address string) (*geocode.Result, error) {
+	f.queries = append(f.queries, address)
+	return f.result, f.err
+}
+
+// Coordinates fill themselves from the address, so nobody types a latitude by
+// hand. The query is the postal line, which is the form a geocoder parses best.
+func TestCreateGeocodesTheAddress(t *testing.T) {
+	_, db := newTestService(t)
+	geo := &fakeGeocoder{result: &geocode.Result{Latitude: 43.0331, Longitude: -85.8225}}
+	svc := NewService(db, geo)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	detail, err := svc.Create(ctx, owner, CreateCourseInput{
+		Name: "Sand Creek",
+		Location: Location{
+			Street: ptr("1831 Johnson St."), City: ptr("Marne"),
+			Region: ptr("MI"), PostalCode: ptr("49435"), Country: ptr("USA"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+
+	if detail.Latitude == nil || *detail.Latitude != 43.0331 {
+		t.Errorf("latitude = %v, want 43.0331", detail.Latitude)
+	}
+	if detail.Longitude == nil || *detail.Longitude != -85.8225 {
+		t.Errorf("longitude = %v, want -85.8225", detail.Longitude)
+	}
+	want := []string{"1831 Johnson St., Marne, MI 49435, USA"}
+	if !slices.Equal(geo.queries, want) {
+		t.Errorf("queries = %v, want %v", geo.queries, want)
+	}
+}
+
+// Geocoding fills gaps; it never corrects anybody. A course saved with a point
+// keeps that point and costs no lookup.
+func TestCreateKeepsSuppliedCoordinates(t *testing.T) {
+	_, db := newTestService(t)
+	geo := &fakeGeocoder{result: &geocode.Result{Latitude: 1, Longitude: 2}}
+	svc := NewService(db, geo)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	detail, err := svc.Create(ctx, owner, CreateCourseInput{
+		Name:      "Hand Placed",
+		Location:  Location{City: ptr("Marne")},
+		Latitude:  ptr(40.0),
+		Longitude: ptr(-80.0),
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+	if detail.Latitude == nil || *detail.Latitude != 40.0 {
+		t.Errorf("latitude = %v, want the supplied 40", detail.Latitude)
+	}
+	if len(geo.queries) != 0 {
+		t.Errorf("queries = %v, want none when a point was supplied", geo.queries)
+	}
+}
+
+// Clearing both coordinates and saving is how a course gets re-placed after its
+// address changes. It is the only re-trigger, and it has to work.
+func TestUpdateReGeocodesWhenCoordinatesAreCleared(t *testing.T) {
+	_, db := newTestService(t)
+	geo := &fakeGeocoder{result: &geocode.Result{Latitude: 43.0331, Longitude: -85.8225}}
+	svc := NewService(db, geo)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	detail, err := svc.Create(ctx, owner, CreateCourseInput{
+		Name: "Moved GC", Location: Location{City: ptr("Marne")},
+		Latitude: ptr(1.0), Longitude: ptr(2.0),
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
+	}
+
+	// Saving the coordinates back unchanged must not re-geocode.
+	if _, err := svc.Update(ctx, owner, detail.ID, UpdateCourseInput{
+		Name: detail.Name, Location: Location{City: ptr("Marne")},
+		Latitude: detail.Latitude, Longitude: detail.Longitude,
+	}); err != nil {
+		t.Fatalf("update course: %v", err)
+	}
+	if len(geo.queries) != 0 {
+		t.Fatalf("queries = %v, want none while a point is set", geo.queries)
+	}
+
+	updated, err := svc.Update(ctx, owner, detail.ID, UpdateCourseInput{
+		Name:     detail.Name,
+		Location: Location{Street: ptr("2475 Johnson St"), City: ptr("Marne")},
+	})
+	if err != nil {
+		t.Fatalf("update course: %v", err)
+	}
+	if updated.Latitude == nil || *updated.Latitude != 43.0331 {
+		t.Errorf("latitude = %v, want it re-resolved to 43.0331", updated.Latitude)
+	}
+	if len(geo.queries) != 1 {
+		t.Errorf("queries = %v, want exactly the one after clearing", geo.queries)
+	}
+}
+
+// None of a geocoder's failures is a reason to refuse to save a golf course.
+func TestGeocodeFailuresNeverBlockASave(t *testing.T) {
+	ctx := context.Background()
+
+	cases := []struct {
+		name string
+		geo  geocode.Geocoder
+		loc  Location
+		want int // expected lookups
+	}{
+		{"lookup errors", &fakeGeocoder{err: errors.New("nominatim is down")}, Location{City: ptr("Marne")}, 1},
+		{"address is unknown", &fakeGeocoder{}, Location{City: ptr("Marne")}, 1},
+		{"no geocoder configured", nil, Location{City: ptr("Marne")}, 0},
+		// A country on its own would geocode to the middle of the country, so
+		// it is not asked at all: a pin in Kansas is worse than no pin.
+		{"too little address to place", &fakeGeocoder{}, Location{Country: ptr("USA")}, 0},
+		{"no address at all", &fakeGeocoder{}, Location{}, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, db := newTestService(t)
+			svc := NewService(db, tc.geo)
+			owner := createUser(t, db, "owner@example.com")
+
+			detail, err := svc.Create(ctx, owner, CreateCourseInput{Name: "Resilient GC", Location: tc.loc})
+			if err != nil {
+				t.Fatalf("create course: %v", err)
+			}
+			if detail.Latitude != nil || detail.Longitude != nil {
+				t.Errorf("point = %v, %v; want none", detail.Latitude, detail.Longitude)
+			}
+			if fake, ok := tc.geo.(*fakeGeocoder); ok && len(fake.queries) != tc.want {
+				t.Errorf("lookups = %d, want %d", len(fake.queries), tc.want)
+			}
+		})
+	}
+}
+
+// A restore can carry sixty courses, and sixty lookups at one a second is both
+// a minute of held-open request and the bulk geocoding the OSM policy forbids.
+func TestImportNeverGeocodes(t *testing.T) {
+	_, db := newTestService(t)
+	geo := &fakeGeocoder{result: &geocode.Result{Latitude: 43.0331, Longitude: -85.8225}}
+	svc := NewService(db, geo)
+	ctx := context.Background()
+	owner := createUser(t, db, "owner@example.com")
+
+	if _, err := svc.Import(ctx, owner, ImportCourseInput{
+		Name:     "Imported GC",
+		Location: Location{Street: ptr("1831 Johnson St."), City: ptr("Marne")},
+	}); err != nil {
+		t.Fatalf("import course: %v", err)
+	}
+	if len(geo.queries) != 0 {
+		t.Errorf("queries = %v, want none: import must not geocode in bulk", geo.queries)
+	}
+}
+
+// Holes are self-limiting (1..18, no duplicates); tees had no cap at all, so a
+// single request could ask for as many rows as fit in the body limit.
+func TestTeeCountIsCapped(t *testing.T) {
+	exported := CourseExport{
+		FormatVersion: courseExportFormatVersion,
+		Name:          "Too Many Tees",
+	}
+	for i := range MaxTeesPerCourse + 1 {
+		exported.Tees = append(exported.Tees, teeRequest{
+			Name:  "Tee " + strconv.Itoa(i),
+			Color: "#FFFFFF",
+		})
+	}
+
+	if _, err := ValidateImport(exported); err == nil {
+		t.Errorf("err = nil for %d tees, want the request refused", len(exported.Tees))
+	}
+
+	// One under the cap is still fine.
+	exported.Tees = exported.Tees[:MaxTeesPerCourse]
+	if _, err := ValidateImport(exported); err != nil {
+		t.Errorf("%d tees was refused: %v", MaxTeesPerCourse, err)
 	}
 }

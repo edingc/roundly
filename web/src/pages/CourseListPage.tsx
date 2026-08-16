@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
+import { useAuth } from '../lib/auth'
 import type { CourseExport, CoursePage } from '../types'
+import { formatCourseLocation } from '../lib/location'
 import {
   Alert,
   EmptyState,
+  HomeIcon,
   PageSpinner,
   PinIcon,
   PlusIcon,
@@ -18,6 +21,7 @@ const PAGE_SIZE = 25
 
 export default function CourseListPage() {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [search, setSearch] = useState('')
@@ -88,10 +92,10 @@ export default function CourseListPage() {
     }
   }
 
-  const items = [...(page?.items ?? [])].sort((a, b) => {
-    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
-    return 0 // preserve server name ordering within each group
-  })
+  // Ordering — home course, then pinned, then by name — is the query's job.
+  // Re-sorting here would only reach the twenty-five rows already fetched, so
+  // a home course on page three would still be on page three.
+  const items = page?.items ?? []
   const total = page?.total ?? 0
   const showingEmpty = !loading && items.length === 0
 
@@ -142,7 +146,7 @@ export default function CourseListPage() {
           type="search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name or address"
+          placeholder="Search by name or place"
           aria-label="Search courses"
           className="input pl-10"
         />
@@ -156,7 +160,7 @@ export default function CourseListPage() {
         search ? (
           <EmptyState
             title="No matches"
-            description={`Nothing matched “${search}”. Try a different name or address.`}
+            description={`Nothing matched “${search}”. Try a different name, town, or state.`}
           />
         ) : (
           <EmptyState
@@ -181,6 +185,15 @@ export default function CourseListPage() {
                 <div className="flex items-start gap-2">
                   <h2 className="font-semibold">{course.name}</h2>
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                    {/* Sky, not the brand green: green already means "pinned"
+                        on this very card, and amber is spoken for elsewhere as
+                        the caution color. */}
+                    {course.id === user?.home_course_id && (
+                      <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800 dark:bg-sky-900 dark:text-sky-100">
+                        <HomeIcon className="size-3" />
+                        Home
+                      </span>
+                    )}
                     {course.pinned && (
                       <span className="flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-800 dark:bg-brand-900 dark:text-brand-100">
                         <PinIcon className="size-3" />
@@ -189,16 +202,20 @@ export default function CourseListPage() {
                     )}
                   </div>
                 </div>
-                {/* Always rendered, even without an address, so every card
-                    reserves the same line — otherwise cards without an
-                    address end up visibly shorter than ones with one. */}
+                {/* The town, not the street: on a card the question is which
+                    course this is, and the street answers that no better than
+                    the town while costing a line of width.
+
+                    Always rendered, even for a course with no location, so
+                    every card reserves the same line — otherwise cards without
+                    one end up visibly shorter than cards with one. */}
                 <p
                   className={cx(
                     'mt-1 text-sm text-slate-600 dark:text-slate-400',
-                    !course.address && 'invisible',
+                    !formatCourseLocation(course) && 'invisible',
                   )}
                 >
-                  {course.address || '—'}
+                  {formatCourseLocation(course) || '—'}
                 </p>
                 <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
                   {course.hole_count} hole{course.hole_count === 1 ? '' : 's'} ·{' '}

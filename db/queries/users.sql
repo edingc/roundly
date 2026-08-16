@@ -32,9 +32,17 @@ SET first_name = ?,
     updated_at = ?
 WHERE id = ?;
 
+-- Gender is a preference, not a profile field, so it has its own statement:
+-- saving a name must not be able to disturb which ratings a round records.
+-- name: SetUserGender :exec
+UPDATE users SET gender = ?, updated_at = ? WHERE id = ?;
+
 -- Changing an address always drops verification: the new one has not been
 -- proven, and carrying the old flag over would mark an unproven address
 -- verified.
+-- Clearing email_verified is part of the same statement rather than a separate
+-- call, so there is no window in which the row names a new address and still
+-- claims the old one was confirmed. Callers only have to send the new link.
 -- name: UpdateUserEmail :exec
 UPDATE users SET email = ?, email_verified = 0, updated_at = ? WHERE id = ?;
 
@@ -70,3 +78,6 @@ SELECT * FROM user_avatars WHERE user_id = ?;
 -- and migration 00012 released it.
 -- name: DeleteUser :exec
 DELETE FROM users WHERE id = ?;
+
+-- name: SetUserTwoFactorEmail :exec
+UPDATE users SET two_factor_email = ?, updated_at = ? WHERE id = ?;

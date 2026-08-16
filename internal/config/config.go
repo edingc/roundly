@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/edingc/roundly/internal/mail"
 )
 
 type Config struct {
@@ -35,12 +37,63 @@ type Config struct {
 	// requests simply queue until one is configured.
 	AdminEmail string
 
+	// Failed sign-in attempts allowed per account per window. The per-IP
+	// allowance is three times this — one address can legitimately carry a
+	// household or an office behind it, and locking that out on one person's
+	// typo is a support ticket rather than a defence. Only failures count, so
+	// somebody who knows their password never runs into either.
+	LoginRateLimit  int
+	LoginRateWindow time.Duration
+
+	// Accounts creatable from one address per window, successful or not. Unlike
+	// the sign-in limit this counts successes, because a successful signup is
+	// the thing being abused: filling an instance with junk accounts needs no
+	// failed attempts at all.
+	SignupRateLimit  int
+	SignupRateWindow time.Duration
+
 	// Personal API keys. The rate limit is per key rather than per user: a key
 	// is what a script holds, so it is the unit that can run away.
 	APIKeyRateLimit  int
 	APIKeyRateWindow time.Duration
 	APIKeyMaxPerUser int
+
+	// NominatimURL is the base URL of a Nominatim instance used to fill a
+	// course's latitude and longitude from its address. Empty disables
+	// geocoding, which is the default: it is the only outbound call the course
+	// directory makes, it sends course addresses to a third party, and it binds
+	// the operator to somebody else's usage policy. All three are decisions for
+	// whoever runs the instance, not for this file.
+	NominatimURL string
+
+	// Mail. Empty means this instance cannot send email, which switches off
+	// address verification and email two-factor together — see internal/mail
+	// for why one of these is picked over the other.
+	MailFrom     string
+	ResendAPIKey string
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
 }
+
+// MailConfig gathers the mail settings for internal/mail, which decides from
+// them which backend to build.
+func (c *Config) MailConfig() mail.Config {
+	return mail.Config{
+		From:         c.MailFrom,
+		ResendAPIKey: c.ResendAPIKey,
+		SMTPHost:     c.SMTPHost,
+		SMTPPort:     c.SMTPPort,
+		SMTPUsername: c.SMTPUsername,
+		SMTPPassword: c.SMTPPassword,
+	}
+}
+
+// GeocodingEnabled reports whether this instance can place a course from its
+// address. When it cannot, latitude and longitude stay exactly what someone
+// typed, which is how the app worked before.
+func (c *Config) GeocodingEnabled() bool { return c.NominatimURL != "" }
 
 // GoogleEnabled reports whether this instance has been given Google OAuth
 // credentials. The frontend hides the Google button when it hasn't.
@@ -60,7 +113,22 @@ func Load() (*Config, error) {
 		GoogleRedirectURL:  env("GOOGLE_REDIRECT_URL", ""),
 		PublicURL:          strings.TrimRight(env("PUBLIC_URL", "http://localhost:5173"), "/"),
 		AdminEmail:         env("ADMIN_EMAIL", ""),
+		NominatimURL:       strings.TrimRight(env("NOMINATIM_URL", ""), "/"),
+		MailFrom:           env("MAIL_FROM", ""),
+		ResendAPIKey:       env("RESEND_API_KEY", ""),
+		SMTPHost:           env("SMTP_HOST", ""),
+		SMTPUsername:       env("SMTP_USERNAME", ""),
+		// Read without trimming or normalising: an app password may legitimately
+		// contain spaces, and "helpfully" cleaning it up is how a correct
+		// credential turns into a login failure nobody can explain.
+		SMTPPassword: os.Getenv("SMTP_PASSWORD"),
 	}
+
+	smtpPort, err := envInt("SMTP_PORT", 587, 1, 65535)
+	if err != nil {
+		return nil, err
+	}
+	c.SMTPPort = smtpPort
 
 	accessTTL, err := envDuration("ACCESS_TOKEN_TTL", 15*time.Minute)
 	if err != nil {
@@ -91,6 +159,30 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	c.APIKeyMaxPerUser = maxKeys
+
+	loginLimit, err := envInt("LOGIN_RATE_LIMIT", 10, 1, 10_000)
+	if err != nil {
+		return nil, err
+	}
+	c.LoginRateLimit = loginLimit
+
+	loginWindow, err := envDuration("LOGIN_RATE_WINDOW", 15*time.Minute)
+	if err != nil {
+		return nil, err
+	}
+	c.LoginRateWindow = loginWindow
+
+	signupLimit, err := envInt("SIGNUP_RATE_LIMIT", 5, 1, 10_000)
+	if err != nil {
+		return nil, err
+	}
+	c.SignupRateLimit = signupLimit
+
+	signupWindow, err := envDuration("SIGNUP_RATE_WINDOW", time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	c.SignupRateWindow = signupWindow
 
 	secret := env("JWT_SECRET", "")
 	if secret == "" {

@@ -44,10 +44,10 @@ func writeCSVArchive(w io.Writer, exp *AccountExport) error {
 	p := exp.Profile
 	if err := write("profile.csv",
 		[]string{"email", "display_name", "first_name", "last_name", "location_city",
-			"location_region", "location_country", "distance_unit", "home_course_name", "created_at"},
+			"location_region", "location_country", "gender", "distance_unit", "home_course_name", "created_at"},
 		[][]string{{
 			p.Email, p.DisplayName, deref(p.FirstName), deref(p.LastName), deref(p.LocationCity),
-			deref(p.LocationRegion), deref(p.LocationCountry), p.DistanceUnit,
+			deref(p.LocationRegion), deref(p.LocationCountry), deref(p.Gender), p.DistanceUnit,
 			deref(p.HomeCourseName), p.CreatedAt,
 		}}); err != nil {
 		return err
@@ -78,7 +78,8 @@ func writeCSVArchive(w io.Writer, exp *AccountExport) error {
 
 	for _, c := range exp.Courses {
 		courseRows = append(courseRows, []string{
-			c.Name, deref(c.Address), deref(c.Phone), deref(c.Website),
+			c.Name, deref(c.Street), deref(c.City), deref(c.Region),
+			deref(c.PostalCode), deref(c.Country), deref(c.Phone), deref(c.Website),
 			deref(c.FacilityType), floatStr(c.Latitude), floatStr(c.Longitude),
 		})
 		for _, t := range c.Tees {
@@ -102,7 +103,8 @@ func writeCSVArchive(w io.Writer, exp *AccountExport) error {
 	}
 
 	if err := write("courses.csv",
-		[]string{"course_name", "address", "phone", "website", "facility_type", "latitude", "longitude"},
+		[]string{"course_name", "street", "city", "region", "postal_code", "country",
+			"phone", "website", "facility_type", "latitude", "longitude"},
 		courseRows); err != nil {
 		return err
 	}
@@ -119,6 +121,43 @@ func writeCSVArchive(w io.Writer, exp *AccountExport) error {
 	if err := write("hole_tee_details.csv",
 		[]string{"course_name", "hole_number", "tee_name", "par", "yardage_yards"},
 		detailRows); err != nil {
+		return err
+	}
+
+	// Rounds and their holes, joined on the same course-name-plus-date key the
+	// JSON import merges on, so the two files can be read together.
+	roundRows := make([][]string, 0, len(exp.Rounds))
+	roundHoleRows := make([][]string, 0)
+	for _, r := range exp.Rounds {
+		roundRows = append(roundRows, []string{
+			r.PlayedOn, r.CourseName, r.TeeName, r.Status, r.EntryMode,
+			strconv.Itoa(r.Holes), deref(r.Nine),
+			floatStr(r.CourseRating), intStr(r.SlopeRating), deref(r.Notes),
+		})
+		for _, h := range r.HoleScores {
+			roundHoleRows = append(roundHoleRows, []string{
+				r.PlayedOn, r.CourseName, strconv.Itoa(h.HoleNumber),
+				intStr(h.Par), intStr(h.Yardage), intStr(h.StrokeIndex),
+				intStr(h.Strokes), intStr(h.Putts),
+				deref(h.TeeClubLabel), deref(h.TeeAccuracy), intStr(h.FirstPuttFeet),
+				boolStr(h.FairwayBunker), boolStr(h.GreensideBunker),
+				strconv.Itoa(h.Penalties), deref(h.PenaltyType),
+			})
+		}
+	}
+
+	if err := write("rounds.csv",
+		[]string{"played_on", "course_name", "tee_name", "status", "entry_mode",
+			"holes", "nine", "course_rating", "slope_rating", "notes"},
+		roundRows); err != nil {
+		return err
+	}
+	if err := write("round_holes.csv",
+		[]string{"played_on", "course_name", "hole_number", "par", "yardage_yards",
+			"stroke_index", "strokes", "putts", "tee_club", "tee_shot",
+			"first_putt_feet", "fairway_bunker", "greenside_bunker",
+			"penalties", "penalty_reason"},
+		roundHoleRows); err != nil {
 		return err
 	}
 
@@ -140,6 +179,13 @@ func safeCell(s string) string {
 		return "'" + s
 	}
 	return s
+}
+
+func boolStr(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
 }
 
 func deref(s *string) string {

@@ -24,7 +24,7 @@ func newTestService(t *testing.T) *Service {
 	t.Cleanup(func() { db.Close() })
 
 	tokens := NewTokenIssuer([]byte("test-secret-key-of-sufficient-length"), 15*time.Minute, 24*time.Hour)
-	return NewService(db, tokens, NewGoogleProvider("", "", ""), "")
+	return NewService(db, tokens, NewGoogleProvider("", "", ""), Options{})
 }
 
 func TestHashAndVerifyPassword(t *testing.T) {
@@ -158,13 +158,13 @@ func TestLogInWrongPasswordAndUnknownEmail(t *testing.T) {
 		t.Fatalf("sign up: %v", err)
 	}
 
-	if _, err := svc.LogIn(ctx, "golfer@example.com", "supersecret123"); err != nil {
+	if _, err := svc.LogIn(ctx, "golfer@example.com", "supersecret123", ""); err != nil {
 		t.Errorf("valid login failed: %v", err)
 	}
-	if _, err := svc.LogIn(ctx, "golfer@example.com", "wrong-password"); err == nil {
+	if _, err := svc.LogIn(ctx, "golfer@example.com", "wrong-password", ""); err == nil {
 		t.Error("login with the wrong password succeeded")
 	}
-	if _, err := svc.LogIn(ctx, "nobody@example.com", "supersecret123"); err == nil {
+	if _, err := svc.LogIn(ctx, "nobody@example.com", "supersecret123", ""); err == nil {
 		t.Error("login with an unknown email succeeded")
 	}
 }
@@ -233,7 +233,7 @@ func TestGoogleLoginLinksToExistingPasswordAccount(t *testing.T) {
 	}
 
 	// And the password still works afterwards.
-	if _, err := svc.LogIn(ctx, "golfer@example.com", "supersecret123"); err != nil {
+	if _, err := svc.LogIn(ctx, "golfer@example.com", "supersecret123", ""); err != nil {
 		t.Errorf("password login broke after linking Google: %v", err)
 	}
 }
@@ -310,7 +310,7 @@ func TestGoogleOnlyUserCanSetPasswordThenLogIn(t *testing.T) {
 	}
 
 	// Password login must not work before one is set.
-	if _, err := svc.LogIn(ctx, "oauthonly@example.com", "brandnewpassword"); err == nil {
+	if _, err := svc.LogIn(ctx, "oauthonly@example.com", "brandnewpassword", ""); err == nil {
 		t.Error("password login worked on an account with no password")
 	}
 
@@ -318,7 +318,7 @@ func TestGoogleOnlyUserCanSetPasswordThenLogIn(t *testing.T) {
 	if err := svc.SetPassword(ctx, session.User.ID, "", "brandnewpassword"); err != nil {
 		t.Fatalf("set password: %v", err)
 	}
-	if _, err := svc.LogIn(ctx, "oauthonly@example.com", "brandnewpassword"); err != nil {
+	if _, err := svc.LogIn(ctx, "oauthonly@example.com", "brandnewpassword", ""); err != nil {
 		t.Errorf("password login failed after setting one: %v", err)
 	}
 }
@@ -341,7 +341,7 @@ func TestSetPasswordRequiresCurrentPasswordWhenOneExists(t *testing.T) {
 	if err := svc.SetPassword(ctx, session.User.ID, "supersecret123", "replacementpassword"); err != nil {
 		t.Fatalf("legitimate password change failed: %v", err)
 	}
-	if _, err := svc.LogIn(ctx, "golfer@example.com", "replacementpassword"); err != nil {
+	if _, err := svc.LogIn(ctx, "golfer@example.com", "replacementpassword", ""); err != nil {
 		t.Errorf("login with the new password failed: %v", err)
 	}
 }

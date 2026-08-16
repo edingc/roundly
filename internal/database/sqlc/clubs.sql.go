@@ -82,7 +82,7 @@ func (q *Queries) DeleteClub(ctx context.Context, id string) error {
 }
 
 const getClub = `-- name: GetClub :one
-SELECT id, user_id, club_type, label, brand, model, loft, shaft, flex, notes, active, retired_at, display_order, created_at, updated_at, expected_carry, average_dispersion FROM clubs WHERE id = ?
+SELECT id, user_id, club_type, label, brand, model, loft, shaft, flex, notes, expected_carry, average_dispersion, active, retired_at, display_order, created_at, updated_at FROM clubs WHERE id = ?
 `
 
 func (q *Queries) GetClub(ctx context.Context, id string) (Club, error) {
@@ -99,19 +99,19 @@ func (q *Queries) GetClub(ctx context.Context, id string) (Club, error) {
 		&i.Shaft,
 		&i.Flex,
 		&i.Notes,
+		&i.ExpectedCarry,
+		&i.AverageDispersion,
 		&i.Active,
 		&i.RetiredAt,
 		&i.DisplayOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.ExpectedCarry,
-		&i.AverageDispersion,
 	)
 	return i, err
 }
 
 const listClubsByUser = `-- name: ListClubsByUser :many
-SELECT id, user_id, club_type, label, brand, model, loft, shaft, flex, notes, active, retired_at, display_order, created_at, updated_at, expected_carry, average_dispersion FROM clubs
+SELECT id, user_id, club_type, label, brand, model, loft, shaft, flex, notes, expected_carry, average_dispersion, active, retired_at, display_order, created_at, updated_at FROM clubs
 WHERE user_id = ?
 ORDER BY display_order ASC, created_at ASC
 `
@@ -136,13 +136,13 @@ func (q *Queries) ListClubsByUser(ctx context.Context, userID string) ([]Club, e
 			&i.Shaft,
 			&i.Flex,
 			&i.Notes,
+			&i.ExpectedCarry,
+			&i.AverageDispersion,
 			&i.Active,
 			&i.RetiredAt,
 			&i.DisplayOrder,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.ExpectedCarry,
-			&i.AverageDispersion,
 		); err != nil {
 			return nil, err
 		}

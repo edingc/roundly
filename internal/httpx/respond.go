@@ -26,7 +26,15 @@ type APIError struct {
 	Status  int
 	Code    string
 	Message string
-	Fields  map[string]string
+	// Fields is per-field validation detail, and nothing else. The client keys
+	// off its presence to decide whether to attach messages to inputs, so an
+	// error that puts unrelated data here renders as a form full of errors
+	// against fields that do not exist.
+	Fields map[string]string
+	// Headers are written alongside the response. For the handful of errors
+	// that have a standard header to carry their detail — Retry-After on a 429
+	// — which is where a client or a proxy actually looks for it.
+	Headers map[string]string
 	err     error
 }
 
@@ -132,6 +140,9 @@ func Error(w http.ResponseWriter, r *http.Request, err error) {
 		)
 	}
 
+	for name, value := range apiErr.Headers {
+		w.Header().Set(name, value)
+	}
 	JSON(w, apiErr.Status, ErrorBody{
 		Error:   apiErr.Code,
 		Message: apiErr.Message,

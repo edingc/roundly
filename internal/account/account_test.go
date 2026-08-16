@@ -28,8 +28,10 @@ func newTestService(t *testing.T) (*Service, *database.DB) {
 	t.Cleanup(func() { db.Close() })
 
 	tokens := auth.NewTokenIssuer([]byte("test-secret-that-is-long-enough-to-sign"), time.Minute, time.Hour)
-	authService := auth.NewService(db, tokens, auth.NewGoogleProvider("", "", ""), "")
-	return NewService(db, authService, course.NewService(db)), db
+	authService := auth.NewService(db, tokens, auth.NewGoogleProvider("", "", ""), auth.Options{
+		Avatars: auth.NewAvatarSigner([]byte("test-secret-that-is-long-enough-to-sign")),
+	})
+	return NewService(db, authService, course.NewService(db, nil)), db
 }
 
 // createUser makes an account with a password, as a signup would.
@@ -105,7 +107,7 @@ func TestDeleteAccountWithCourses(t *testing.T) {
 	leaving := createUser(t, db, "leaving@example.test")
 	staying := createUser(t, db, "staying@example.test")
 
-	courses := course.NewService(db)
+	courses := course.NewService(db, nil)
 	detail, err := courses.Create(ctx, leaving, course.CreateCourseInput{
 		Name: "Legacy Links",
 		Tees: []course.TeeInput{{Name: "Back", Color: "#000000"}},
@@ -249,7 +251,7 @@ func TestDeleteAccountKeepsTheirRemovalRequests(t *testing.T) {
 	requester := createUser(t, db, "requester@example.test")
 	other := createUser(t, db, "other@example.test")
 
-	courses := course.NewService(db)
+	courses := course.NewService(db, nil)
 	detail, err := courses.Create(ctx, other, course.CreateCourseInput{Name: "Disputed GC"})
 	if err != nil {
 		t.Fatalf("create course: %v", err)
@@ -271,5 +273,55 @@ func TestDeleteAccountKeepsTheirRemovalRequests(t *testing.T) {
 	}
 	if pending[0].RequestedBy != nil {
 		t.Errorf("requested_by = %v, want nil", pending[0].RequestedBy)
+	}
+}
+
+// Gender is a preference with its own statement, precisely so that saving a
+// name cannot disturb which ratings a round records. Before the split they
+// shared one UPDATE, and a profile save that did not carry gender blanked it.
+func TestSavingTheProfileLeavesGenderAlone(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	userID := createUser(t, db, "player@example.com")
+
+	if _, err := svc.auth.SetGender(ctx, userID, strPtr(auth.GenderWomen)); err != nil {
+		t.Fatalf("set gender: %v", err)
+	}
+
+	updated, err := svc.UpdateProfile(ctx, userID, ProfileInput{
+		DisplayName:  "Renamed Golfer",
+		LocationCity: strPtr("Marne"),
+	})
+	if err != nil {
+		t.Fatalf("update profile: %v", err)
+	}
+	if updated.DisplayName != "Renamed Golfer" {
+		t.Errorf("display name = %q, want it saved", updated.DisplayName)
+	}
+	if updated.Gender == nil || *updated.Gender != auth.GenderWomen {
+		t.Errorf("gender = %v after a profile save, want it untouched", updated.Gender)
+	}
+}
+
+// Clearing it back to unset is a real choice, not a missing value: unset means
+// the men's ratings.
+func TestGenderCanBeClearedBackToUnset(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	userID := createUser(t, db, "player@example.com")
+
+	if _, err := svc.auth.SetGender(ctx, userID, strPtr(auth.GenderMen)); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	cleared, err := svc.auth.SetGender(ctx, userID, nil)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared.Gender != nil {
+		t.Errorf("gender = %v, want nil", cleared.Gender)
+	}
+
+	if _, err := svc.auth.SetGender(ctx, userID, strPtr("other")); err == nil {
+		t.Error("err = nil for an unknown value, want it refused")
 	}
 }

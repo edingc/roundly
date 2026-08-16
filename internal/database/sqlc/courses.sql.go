@@ -23,7 +23,11 @@ func (q *Queries) CountCourses(ctx context.Context) (int64, error) {
 const countSearchCourses = `-- name: CountSearchCourses :one
 SELECT COUNT(*) FROM courses
 WHERE instr(lower(name), ?1) > 0
-   OR instr(lower(IFNULL(address, '')), ?1) > 0
+   OR instr(lower(IFNULL(street, '')), ?1) > 0
+   OR instr(lower(IFNULL(city, '')), ?1) > 0
+   OR instr(lower(IFNULL(region, '')), ?1) > 0
+   OR instr(lower(IFNULL(postal_code, '')), ?1) > 0
+   OR instr(lower(IFNULL(country, '')), ?1) > 0
 `
 
 func (q *Queries) CountSearchCourses(ctx context.Context, query string) (int64, error) {
@@ -34,14 +38,18 @@ func (q *Queries) CountSearchCourses(ctx context.Context, query string) (int64, 
 }
 
 const createCourse = `-- name: CreateCourse :exec
-INSERT INTO courses (id, name, address, phone, website, notes, facility_type, latitude, longitude, pinned, uploaded_by, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO courses (id, name, street, city, region, postal_code, country, phone, website, notes, facility_type, latitude, longitude, pinned, uploaded_by, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateCourseParams struct {
 	ID           string
 	Name         string
-	Address      *string
+	Street       *string
+	City         *string
+	Region       *string
+	PostalCode   *string
+	Country      *string
 	Phone        *string
 	Website      *string
 	Notes        *string
@@ -58,7 +66,11 @@ func (q *Queries) CreateCourse(ctx context.Context, arg CreateCourseParams) erro
 	_, err := q.db.ExecContext(ctx, createCourse,
 		arg.ID,
 		arg.Name,
-		arg.Address,
+		arg.Street,
+		arg.City,
+		arg.Region,
+		arg.PostalCode,
+		arg.Country,
 		arg.Phone,
 		arg.Website,
 		arg.Notes,
@@ -83,7 +95,7 @@ func (q *Queries) DeleteCourse(ctx context.Context, id string) error {
 }
 
 const getCourse = `-- name: GetCourse :one
-SELECT id, name, address, uploaded_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses WHERE id = ?
+SELECT id, name, street, city, region, postal_code, country, latitude, longitude, phone, website, notes, facility_type, pinned, uploaded_by, created_at, updated_at FROM courses WHERE id = ?
 `
 
 func (q *Queries) GetCourse(ctx context.Context, id string) (Course, error) {
@@ -92,34 +104,58 @@ func (q *Queries) GetCourse(ctx context.Context, id string) (Course, error) {
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
-		&i.Address,
-		&i.UploadedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+		&i.Street,
+		&i.City,
+		&i.Region,
+		&i.PostalCode,
+		&i.Country,
+		&i.Latitude,
+		&i.Longitude,
 		&i.Phone,
 		&i.Website,
 		&i.Notes,
 		&i.FacilityType,
-		&i.Latitude,
-		&i.Longitude,
 		&i.Pinned,
+		&i.UploadedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const listCourses = `-- name: ListCourses :many
-SELECT id, name, address, uploaded_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
-ORDER BY name COLLATE NOCASE ASC
-LIMIT ? OFFSET ?
+SELECT courses.id, courses.name, courses.street, courses.city, courses.region, courses.postal_code, courses.country, courses.latitude, courses.longitude, courses.phone, courses.website, courses.notes, courses.facility_type, courses.pinned, courses.uploaded_by, courses.created_at, courses.updated_at FROM courses
+LEFT JOIN users ON users.id = ?1 AND users.home_course_id = courses.id
+ORDER BY (users.id IS NOT NULL) DESC, courses.pinned DESC, courses.name COLLATE NOCASE ASC
+LIMIT ?3 OFFSET ?2
 `
 
 type ListCoursesParams struct {
-	Limit  int64
+	UserID string
 	Offset int64
+	Limit  int64
 }
 
+// The directory's one ordering, shared by the list and the search below.
+//
+// The caller's home course comes first, then pinned courses, then the rest by
+// their names. It has to happen here rather than by re-sorting a page in the
+// client: "first" across a paginated directory means first of all of them, and
+// a client sort can only reach the twenty-five rows it was already sent.
+//
+// The home course is found by joining users rather than by comparing against a
+// bound id, because sqlc's SQLite parser does not bind parameters inside an
+// ORDER BY at all: it emits the placeholder but leaves it out of the params
+// struct, so the remaining arguments silently shift by one. In a JOIN condition
+// it binds correctly, and the join costs nothing extra: it reads the same
+// home_course_id a separate lookup would have.
+//
+// The join matches at most one row and takes no column from it, so the result
+// is still a plain course row. A player with no home course matches nothing,
+// the first ordering term is false throughout, and the order falls through to
+// pinned.
 func (q *Queries) ListCourses(ctx context.Context, arg ListCoursesParams) ([]Course, error) {
-	rows, err := q.db.QueryContext(ctx, listCourses, arg.Limit, arg.Offset)
+	rows, err := q.db.QueryContext(ctx, listCourses, arg.UserID, arg.Offset, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -130,17 +166,21 @@ func (q *Queries) ListCourses(ctx context.Context, arg ListCoursesParams) ([]Cou
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
-			&i.Address,
-			&i.UploadedBy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.Street,
+			&i.City,
+			&i.Region,
+			&i.PostalCode,
+			&i.Country,
+			&i.Latitude,
+			&i.Longitude,
 			&i.Phone,
 			&i.Website,
 			&i.Notes,
 			&i.FacilityType,
-			&i.Latitude,
-			&i.Longitude,
 			&i.Pinned,
+			&i.UploadedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -156,7 +196,7 @@ func (q *Queries) ListCourses(ctx context.Context, arg ListCoursesParams) ([]Cou
 }
 
 const listCoursesByUploader = `-- name: ListCoursesByUploader :many
-SELECT id, name, address, uploaded_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
+SELECT id, name, street, city, region, postal_code, country, latitude, longitude, phone, website, notes, facility_type, pinned, uploaded_by, created_at, updated_at FROM courses
 WHERE uploaded_by = ?
 ORDER BY name COLLATE NOCASE ASC
 `
@@ -175,17 +215,21 @@ func (q *Queries) ListCoursesByUploader(ctx context.Context, uploadedBy *string)
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
-			&i.Address,
-			&i.UploadedBy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.Street,
+			&i.City,
+			&i.Region,
+			&i.PostalCode,
+			&i.Country,
+			&i.Latitude,
+			&i.Longitude,
 			&i.Phone,
 			&i.Website,
 			&i.Notes,
 			&i.FacilityType,
-			&i.Latitude,
-			&i.Longitude,
 			&i.Pinned,
+			&i.UploadedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -201,14 +245,20 @@ func (q *Queries) ListCoursesByUploader(ctx context.Context, uploadedBy *string)
 }
 
 const searchCourses = `-- name: SearchCourses :many
-SELECT id, name, address, uploaded_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
-WHERE instr(lower(name), ?1) > 0
-   OR instr(lower(IFNULL(address, '')), ?1) > 0
-ORDER BY name COLLATE NOCASE ASC
-LIMIT ?3 OFFSET ?2
+SELECT courses.id, courses.name, courses.street, courses.city, courses.region, courses.postal_code, courses.country, courses.latitude, courses.longitude, courses.phone, courses.website, courses.notes, courses.facility_type, courses.pinned, courses.uploaded_by, courses.created_at, courses.updated_at FROM courses
+LEFT JOIN users ON users.id = ?1 AND users.home_course_id = courses.id
+WHERE instr(lower(courses.name), ?2) > 0
+   OR instr(lower(IFNULL(courses.street, '')), ?2) > 0
+   OR instr(lower(IFNULL(courses.city, '')), ?2) > 0
+   OR instr(lower(IFNULL(courses.region, '')), ?2) > 0
+   OR instr(lower(IFNULL(courses.postal_code, '')), ?2) > 0
+   OR instr(lower(IFNULL(courses.country, '')), ?2) > 0
+ORDER BY (users.id IS NOT NULL) DESC, courses.pinned DESC, courses.name COLLATE NOCASE ASC
+LIMIT ?4 OFFSET ?3
 `
 
 type SearchCoursesParams struct {
+	UserID string
 	Query  string
 	Offset int64
 	Limit  int64
@@ -218,8 +268,18 @@ type SearchCoursesParams struct {
 // course named "50% Off Golf" is findable, and sqlc's SQLite parser does not
 // support the ESCAPE clause that literal LIKE matching would require.
 // lower() gives ASCII-case-insensitive matching; callers pass a lowered term.
+//
+// Every part of the address is searched, not just the street, so that "marne"
+// and "MI" both find the courses there. That is what makes the profile's
+// home-course picker usable: people look for their club by town, not by the
+// street it sits on.
 func (q *Queries) SearchCourses(ctx context.Context, arg SearchCoursesParams) ([]Course, error) {
-	rows, err := q.db.QueryContext(ctx, searchCourses, arg.Query, arg.Offset, arg.Limit)
+	rows, err := q.db.QueryContext(ctx, searchCourses,
+		arg.UserID,
+		arg.Query,
+		arg.Offset,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -230,17 +290,21 @@ func (q *Queries) SearchCourses(ctx context.Context, arg SearchCoursesParams) ([
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
-			&i.Address,
-			&i.UploadedBy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.Street,
+			&i.City,
+			&i.Region,
+			&i.PostalCode,
+			&i.Country,
+			&i.Latitude,
+			&i.Longitude,
 			&i.Phone,
 			&i.Website,
 			&i.Notes,
 			&i.FacilityType,
-			&i.Latitude,
-			&i.Longitude,
 			&i.Pinned,
+			&i.UploadedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -270,12 +334,16 @@ func (q *Queries) TouchCourse(ctx context.Context, arg TouchCourseParams) error 
 }
 
 const updateCourse = `-- name: UpdateCourse :exec
-UPDATE courses SET name = ?, address = ?, phone = ?, website = ?, notes = ?, facility_type = ?, latitude = ?, longitude = ?, pinned = ?, updated_at = ? WHERE id = ?
+UPDATE courses SET name = ?, street = ?, city = ?, region = ?, postal_code = ?, country = ?, phone = ?, website = ?, notes = ?, facility_type = ?, latitude = ?, longitude = ?, pinned = ?, updated_at = ? WHERE id = ?
 `
 
 type UpdateCourseParams struct {
 	Name         string
-	Address      *string
+	Street       *string
+	City         *string
+	Region       *string
+	PostalCode   *string
+	Country      *string
 	Phone        *string
 	Website      *string
 	Notes        *string
@@ -290,7 +358,11 @@ type UpdateCourseParams struct {
 func (q *Queries) UpdateCourse(ctx context.Context, arg UpdateCourseParams) error {
 	_, err := q.db.ExecContext(ctx, updateCourse,
 		arg.Name,
-		arg.Address,
+		arg.Street,
+		arg.City,
+		arg.Region,
+		arg.PostalCode,
+		arg.Country,
 		arg.Phone,
 		arg.Website,
 		arg.Notes,

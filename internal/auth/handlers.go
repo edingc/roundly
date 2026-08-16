@@ -31,6 +31,11 @@ const (
 // oauthCookieTTL bounds how long a user has to finish the Google consent screen.
 const oauthCookieTTL = 10 * time.Minute
 
+// deviceTokenHeader carries the trusted-device token on requests that have no
+// body to put it in. Only the device list uses it, and only to mark which row
+// is the browser doing the asking.
+const deviceTokenHeader = "X-Roundly-Device"
+
 // Handler exposes the auth endpoints.
 type Handler struct {
 	service   *Service
@@ -38,16 +43,70 @@ type Handler struct {
 	handoffs  *handoffStore
 	publicURL string
 	secure    bool
+	// geocodingEnabled is reported by /auth/config and used for nothing else
+	// here. It rides along because that endpoint is where the frontend already
+	// asks what this instance can do, and a second config endpoint answering
+	// one boolean would be worse.
+	geocodingEnabled bool
+	// attempts caps wrong answers on the credential endpoints. It lives on the
+	// handler rather than the service because it counts by IP as well as by
+	// account, and the request is the only thing that knows the IP.
+	attempts *throttle
+	// signups caps account creation. Separate from attempts because it counts
+	// the opposite thing — see signupThrottle.
+	signups *signupThrottle
 }
 
-func NewHandler(service *Service, google *GoogleProvider, publicURL string, secure bool) *Handler {
-	return &Handler{
-		service:   service,
-		google:    google,
-		handoffs:  newHandoffStore(),
-		publicURL: strings.TrimRight(publicURL, "/"),
-		secure:    secure,
+// HandlerOptions is the handler's configuration, as a struct for the same
+// reason Options is: the list had grown past the point where a reader could
+// tell two adjacent booleans apart at the call site.
+type HandlerOptions struct {
+	PublicURL        string
+	Secure           bool
+	GeocodingEnabled bool
+	// LoginRateLimit is how many failed attempts one account may make in
+	// LoginRateWindow. The per-IP allowance is three times this.
+	LoginRateLimit  int
+	LoginRateWindow time.Duration
+	// SignupRateLimit is how many accounts may be created from one address in
+	// SignupRateWindow, successful or not.
+	SignupRateLimit  int
+	SignupRateWindow time.Duration
+}
+
+func NewHandler(service *Service, google *GoogleProvider, opts HandlerOptions) *Handler {
+	limit := opts.LoginRateLimit
+	if limit <= 0 {
+		limit = 10
 	}
+	window := opts.LoginRateWindow
+	if window <= 0 {
+		window = 15 * time.Minute
+	}
+	signupLimit := opts.SignupRateLimit
+	if signupLimit <= 0 {
+		signupLimit = 5
+	}
+	signupWindow := opts.SignupRateWindow
+	if signupWindow <= 0 {
+		signupWindow = time.Hour
+	}
+	return &Handler{
+		service:          service,
+		google:           google,
+		handoffs:         newHandoffStore(),
+		publicURL:        strings.TrimRight(opts.PublicURL, "/"),
+		secure:           opts.Secure,
+		geocodingEnabled: opts.GeocodingEnabled,
+		attempts:         newThrottle(limit, window),
+		signups:          newSignupThrottle(signupLimit, signupWindow),
+	}
+}
+
+// StartJanitor sweeps the attempt counters until stop is closed.
+func (h *Handler) StartJanitor(stop <-chan struct{}) {
+	h.attempts.startJanitor(stop)
+	h.signups.startJanitor(stop)
 }
 
 // Routes returns the /api/auth router. Everything under /me, /link, and
@@ -61,6 +120,10 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/refresh", h.refresh)
 	r.Post("/logout", h.logOut)
 
+	r.Post("/two-factor/verify", h.twoFactorVerify)
+	r.Post("/two-factor/recovery", h.twoFactorRecovery)
+	r.Post("/verify-email", h.verifyEmail)
+
 	r.Get("/google/start", h.googleStart)
 	r.Get("/google/callback", h.googleCallback)
 	r.Post("/google/exchange", h.googleExchange)
@@ -72,18 +135,44 @@ func (h *Handler) Routes() chi.Router {
 		pr.Post("/link/google", h.googleStart)
 		pr.Post("/password", h.setPassword)
 		pr.Put("/preferences", h.setPreferences)
+		pr.Put("/two-factor", h.setTwoFactor)
+		pr.Post("/two-factor/recovery-codes", h.regenerateRecoveryCodes)
+		pr.Get("/devices", h.listDevices)
+		pr.Delete("/devices/{deviceID}", h.forgetDevice)
+		pr.Post("/verify-email/resend", h.resendVerification)
 	})
 
 	return r
 }
 
 type configResponse struct {
-	GoogleEnabled bool `json:"google_enabled"`
+	GoogleEnabled    bool `json:"google_enabled"`
+	GeocodingEnabled bool `json:"geocoding_enabled"`
+	// EmailEnabled says whether this instance can send mail at all, which is
+	// what gates both the confirm-your-address flow and the two-factor setting.
+	// The frontend hides both when it is false rather than offering a switch
+	// that cannot work.
+	EmailEnabled bool `json:"email_enabled"`
+	// EmailVerificationRequired says whether an unconfirmed account is blocked
+	// from the app. Today it tracks EmailEnabled exactly; it is reported
+	// separately because the client renders a different screen for each and
+	// should not have to know they happen to coincide.
+	EmailVerificationRequired bool `json:"email_verification_required"`
 }
 
-// config lets the frontend decide whether to render the Google button.
+// config tells the frontend which optional features this instance has been
+// given credentials for, so it can render the Google button and the address
+// geocoding hint only where they mean something.
+//
+// It is unauthenticated and says nothing but yes or no: an instance's feature
+// set is already obvious from its login screen.
 func (h *Handler) config(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, configResponse{GoogleEnabled: h.google.Enabled()})
+	httpx.JSON(w, http.StatusOK, configResponse{
+		GoogleEnabled:             h.google.Enabled(),
+		GeocodingEnabled:          h.geocodingEnabled,
+		EmailEnabled:              h.service.MailEnabled(),
+		EmailVerificationRequired: h.service.EmailVerificationRequired(),
+	})
 }
 
 type signUpRequest struct {
@@ -95,6 +184,14 @@ type signUpRequest struct {
 func (h *Handler) signUp(w http.ResponseWriter, r *http.Request) {
 	var req signUpRequest
 	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	// Counted before validation rather than after. A script probing which
+	// addresses are already registered never needs to send a valid password,
+	// and charging only well-formed attempts would leave that free.
+	if err := h.signups.attempt(clientIP(r)); err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
@@ -120,6 +217,10 @@ func (h *Handler) signUp(w http.ResponseWriter, r *http.Request) {
 type logInRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	// DeviceToken is what a previous two-factor login handed this client to
+	// skip the code next time. Absent on a first sign-in and on every client
+	// that has never completed one.
+	DeviceToken string `json:"device_token"`
 }
 
 func (h *Handler) logIn(w http.ResponseWriter, r *http.Request) {
@@ -139,12 +240,254 @@ func (h *Handler) logIn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := h.service.LogIn(r.Context(), req.Email, req.Password)
+	// Keyed on the normalised address so that casing and dots cannot be used to
+	// get a fresh bucket per attempt.
+	account := httpx.NormalizeEmail(req.Email)
+	ip := clientIP(r)
+	if err := h.attempts.check(account, ip); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	result, err := h.service.LogIn(r.Context(), req.Email, req.Password, req.DeviceToken)
 	if err != nil {
+		// Only the caller's own mistakes are counted. A 500 is this server
+		// failing, and charging the user for it would turn one outage into a
+		// lockout that outlives it.
+		if isClientError(err) {
+			h.attempts.failed(account, ip)
+		}
+		httpx.Error(w, r, err)
+		return
+	}
+	// Two shapes, one status. A pending second factor is not an error — the
+	// password was right — so it is a 200 carrying a challenge, and the client
+	// tells them apart by the two_factor_required field.
+	if result.Challenge != nil {
+		httpx.JSON(w, http.StatusOK, result.Challenge)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, result.Session)
+}
+
+type twoFactorVerifyRequest struct {
+	ChallengeID string `json:"challenge_id"`
+	Code        string `json:"code"`
+	// RememberDevice asks for a device token so this browser is not challenged
+	// again for thirty days.
+	RememberDevice bool `json:"remember_device"`
+}
+
+// twoFactorVerify finishes a login that stopped for a code.
+func (h *Handler) twoFactorVerify(w http.ResponseWriter, r *http.Request) {
+	var req twoFactorVerifyRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	v := httpx.NewValidator()
+	v.Required("challenge_id", req.ChallengeID)
+	v.Required("code", req.Code)
+	if err := v.Err(); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	// Counted by IP alone: the request names a challenge, not an account, and
+	// resolving one to the other before the code is checked would make this
+	// endpoint answer questions about which challenges exist. The challenge's
+	// own five-attempt cap is the tighter limit; this is what stops somebody
+	// working through challenges rather than through codes.
+	ip := clientIP(r)
+	if err := h.attempts.check("", ip); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	session, err := h.service.CompleteTwoFactor(
+		r.Context(), req.ChallengeID, req.Code, req.RememberDevice, deviceLabel(r))
+	if err != nil {
+		if isClientError(err) {
+			h.attempts.failed("", ip)
+		}
 		httpx.Error(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, session)
+}
+
+type twoFactorSettingRequest struct {
+	Enabled  bool   `json:"enabled"`
+	Password string `json:"current_password"`
+}
+
+// setTwoFactor turns email sign-in codes on or off for the caller.
+func (h *Handler) setTwoFactor(w http.ResponseWriter, r *http.Request) {
+	// An API key must never be able to change how its owner signs in. The key
+	// is read-only by policy, but this is the guarantee rather than that.
+	if IsAPIKey(r.Context()) {
+		httpx.Error(w, r, httpx.Forbidden("API keys cannot change sign-in settings."))
+		return
+	}
+
+	var req twoFactorSettingRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	ctx := r.Context()
+	setup, err := h.service.SetTwoFactor(ctx, MustUserID(ctx), req.Password, req.Enabled)
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	// Carries the recovery codes when enabling. This is the only response that
+	// ever will — they are stored hashed and cannot be shown again.
+	httpx.JSON(w, http.StatusOK, setup)
+}
+
+type recoveryCodesRequest struct {
+	Password string `json:"current_password"`
+}
+
+// regenerateRecoveryCodes replaces the caller's sheet and returns the new one.
+//
+// A POST rather than a GET because it is destructive: the old codes stop
+// working the moment this succeeds, and a URL that could be prefetched or
+// retried must not be able to invalidate somebody's printed sheet.
+func (h *Handler) regenerateRecoveryCodes(w http.ResponseWriter, r *http.Request) {
+	if IsAPIKey(r.Context()) {
+		httpx.Error(w, r, httpx.Forbidden("API keys cannot change sign-in settings."))
+		return
+	}
+
+	var req recoveryCodesRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	ctx := r.Context()
+	codes, err := h.service.GenerateRecoveryCodes(ctx, MustUserID(ctx), req.Password)
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"recovery_codes": codes})
+}
+
+type recoveryLoginRequest struct {
+	ChallengeID string `json:"challenge_id"`
+	Code        string `json:"recovery_code"`
+}
+
+// twoFactorRecovery completes a login with a recovery code instead of a mailed
+// one, for the person who can no longer read their email.
+func (h *Handler) twoFactorRecovery(w http.ResponseWriter, r *http.Request) {
+	var req recoveryLoginRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	v := httpx.NewValidator()
+	v.Required("challenge_id", req.ChallengeID)
+	v.Required("recovery_code", req.Code)
+	if err := v.Err(); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	// Throttled on the same counters as the code path: a recovery code is
+	// lower entropy than a session token and higher value than a mailed code,
+	// so it is the last place to leave unmetered.
+	ip := clientIP(r)
+	if err := h.attempts.check("", ip); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	session, err := h.service.RedeemRecoveryCode(r.Context(), req.ChallengeID, req.Code)
+	if err != nil {
+		if isClientError(err) {
+			h.attempts.failed("", ip)
+		}
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, session)
+}
+
+// listDevices returns the browsers this account has chosen to remember.
+func (h *Handler) listDevices(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	// The current device token arrives in a header rather than the body: this
+	// is a GET, and the only thing it is used for is marking one row "this one".
+	devices, err := h.service.ListTrustedDevices(ctx, MustUserID(ctx), r.Header.Get(deviceTokenHeader))
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"items": devices})
+}
+
+// forgetDevice drops one remembered browser, which will be asked for a code the
+// next time it signs in.
+func (h *Handler) forgetDevice(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if err := h.service.ForgetDevice(ctx, MustUserID(ctx), chi.URLParam(r, "deviceID")); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.NoContent(w)
+}
+
+type verifyEmailRequest struct {
+	Token string `json:"token"`
+}
+
+// verifyEmail redeems the token from a confirmation link.
+//
+// Unauthenticated: see Service.VerifyEmail. It returns the user so a client that
+// happens to be signed in as that person can refresh in place.
+func (h *Handler) verifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req verifyEmailRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	user, err := h.service.VerifyEmail(r.Context(), req.Token)
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, user)
+}
+
+// resendVerification mails a fresh confirmation link to the caller.
+func (h *Handler) resendVerification(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	if err := h.service.SendVerificationEmail(ctx, MustUserID(ctx)); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.NoContent(w)
+}
+
+// deviceLabel describes the browser for the owner's own device list.
+//
+// The User-Agent, truncated, and nothing else — no fingerprint, no IP. It is a
+// label to recognise a row by, not an identifier, and it is never used to
+// decide anything.
+func deviceLabel(r *http.Request) string {
+	agent := strings.TrimSpace(r.UserAgent())
+	if agent == "" {
+		return "Unknown browser"
+	}
+	return agent
 }
 
 type refreshRequest struct {
@@ -221,8 +564,18 @@ func (h *Handler) setPassword(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, user)
 }
 
+// preferencesRequest carries whichever preferences the client is changing.
+//
+// Pointers, so an omitted field means "leave it alone" rather than "clear it".
+// The screen saves each control the moment it is touched, and a request that
+// carried the whole set would let a stale copy of one preference overwrite a
+// change to another.
 type preferencesRequest struct {
-	DistanceUnit string `json:"distance_unit"`
+	DistanceUnit *string `json:"distance_unit"`
+	// Gender is a tri-state: absent leaves it, "" clears it back to unset, and
+	// a value sets it. Unset is meaningful rather than missing - it selects the
+	// men's ratings, which is what every round used before the column existed.
+	Gender *string `json:"gender"`
 }
 
 // setPreferences updates the caller's display preferences and returns the whole
@@ -236,12 +589,39 @@ func (h *Handler) setPreferences(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	user, err := h.service.SetDistanceUnit(ctx, MustUserID(ctx), strings.ToLower(strings.TrimSpace(req.DistanceUnit)))
+	userID := MustUserID(ctx)
+
+	if req.DistanceUnit != nil {
+		if _, err := h.service.SetDistanceUnit(ctx, userID, strings.ToLower(strings.TrimSpace(*req.DistanceUnit))); err != nil {
+			httpx.Error(w, r, err)
+			return
+		}
+	}
+	if req.Gender != nil {
+		if _, err := h.service.SetGender(ctx, userID, normalizeGender(*req.Gender)); err != nil {
+			httpx.Error(w, r, err)
+			return
+		}
+	}
+
+	// Reloaded once at the end rather than returning whichever setter ran last,
+	// so the response is the whole user however many preferences changed.
+	user, err := h.service.CurrentUser(ctx, userID)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, user)
+}
+
+// normalizeGender turns the wire value into what the column stores: a blank
+// string is how the client says "unset", and unset is NULL.
+func normalizeGender(raw string) *string {
+	trimmed := strings.ToLower(strings.TrimSpace(raw))
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 // googleStart redirects the browser to Google's consent screen.
@@ -453,6 +833,19 @@ func randomToken() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(buf), nil
+}
+
+// isClientError reports whether err is the caller's fault, and so whether it
+// should count against their allowance.
+func isClientError(err error) bool {
+	var apiErr *httpx.APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	// A 429 is excluded so that being refused does not itself extend the
+	// refusal, which would turn a fixed window into an unbounded one for any
+	// client that keeps retrying.
+	return apiErr.Status >= 400 && apiErr.Status < 500 && apiErr.Status != http.StatusTooManyRequests
 }
 
 func wantsJSON(r *http.Request) bool {

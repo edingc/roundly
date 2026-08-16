@@ -52,10 +52,20 @@ func newTestServer(t *testing.T, rateLimit int) (http.Handler, *database.DB) {
 		APIKeyRateLimit:  rateLimit,
 		APIKeyRateWindow: time.Minute,
 		APIKeyMaxPerUser: 10,
+		// Generous on purpose. These fixtures create accounts freely, and a
+		// realistic signup limit would make an unrelated test fail on its sixth
+		// fixture with a message about rate limiting. The limit itself is
+		// tested deliberately, in throttle_test.go.
+		SignupRateLimit:  1000,
+		SignupRateWindow: time.Hour,
 	}
 	stop := make(chan struct{})
 	t.Cleanup(func() { close(stop) })
-	return New(cfg, db, nil, stop), db
+	handler, err := New(cfg, db, nil, stop)
+	if err != nil {
+		t.Fatalf("build handler: %v", err)
+	}
+	return handler, db
 }
 
 // signUp creates an account through the real endpoint and returns its ID and a
@@ -541,10 +551,20 @@ func newAdminTestServer(t *testing.T, adminEmail string) (http.Handler, *databas
 		APIKeyRateLimit:  1000,
 		APIKeyRateWindow: time.Minute,
 		APIKeyMaxPerUser: 10,
+		// Generous on purpose. These fixtures create accounts freely, and a
+		// realistic signup limit would make an unrelated test fail on its sixth
+		// fixture with a message about rate limiting. The limit itself is
+		// tested deliberately, in throttle_test.go.
+		SignupRateLimit:  1000,
+		SignupRateWindow: time.Hour,
 	}
 	stop := make(chan struct{})
 	t.Cleanup(func() { close(stop) })
-	return New(cfg, db, nil, stop), db
+	handler, err := New(cfg, db, nil, stop)
+	if err != nil {
+		t.Fatalf("build handler: %v", err)
+	}
+	return handler, db
 }
 
 // createCourse makes a course through the API and returns its ID.
@@ -667,5 +687,39 @@ func TestAPIKeyCannotReachAdminRoutes(t *testing.T) {
 	// And the course survived every attempt.
 	if rr := do(t, h, http.MethodGet, "/api/courses/"+courseID, adminToken); rr.Code != http.StatusOK {
 		t.Errorf("the course was removed by an API key: %d", rr.Code)
+	}
+}
+
+// A working key must get the limit it was configured with. The failure limiter
+// used to record every key-authenticated request rather than only the failed
+// ones, which silently capped any key at that limiter's 20/min however high
+// API_KEY_RATE_LIMIT was set.
+func TestValidKeyIsNotChargedToTheFailureLimiter(t *testing.T) {
+	h, db := newTestServer(t, 1000)
+	userID, _ := signUp(t, h, "scripter@example.com")
+	key := mintKey(t, db, userID)
+
+	for i := 1; i <= 40; i++ {
+		rr := do(t, h, http.MethodGet, "/api/courses", key)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("request %d: status %d, want 200; body %s", i, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+// Bad keys still are, and by IP, since they cost a query each.
+func TestBadKeysAreRateLimitedByAddress(t *testing.T) {
+	h, _ := newTestServer(t, 1000)
+
+	var last int
+	for i := 1; i <= 30; i++ {
+		rr := do(t, h, http.MethodGet, "/api/courses", "rnd_"+strings.Repeat("a", 40))
+		last = rr.Code
+		if last == http.StatusTooManyRequests {
+			break
+		}
+	}
+	if last != http.StatusTooManyRequests {
+		t.Errorf("status = %d after 30 bad keys, want 429", last)
 	}
 }

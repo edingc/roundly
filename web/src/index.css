@@ -21,6 +21,37 @@
   --color-brand-950: oklch(0.2 0.05 150);
 }
 
+/* Chart colours.
+ *
+ * Declared as plain CSS variables rather than passed from React, so a chart
+ * repaints on a theme change without re-rendering: Recharts writes these
+ * straight into SVG attributes, and the browser resolves them against whichever
+ * :root is in force. The alternative - reading the resolved theme in a hook and
+ * threading hex values through every chart - means every chart has to remember
+ * to do it, and one that forgets is invisible in dark mode.
+ */
+:root {
+  --chart-grid: var(--color-slate-200);
+  --chart-axis: var(--color-slate-400);
+  --chart-label: var(--color-slate-500);
+  --chart-surface: #ffffff;
+  --chart-series-1: var(--color-brand-600);
+  --chart-series-2: var(--color-sky-600);
+  --chart-series-3: var(--color-amber-500);
+  --chart-series-4: var(--color-violet-500);
+}
+
+.dark {
+  --chart-grid: var(--color-slate-800);
+  --chart-axis: var(--color-slate-600);
+  --chart-label: var(--color-slate-400);
+  --chart-surface: var(--color-slate-900);
+  --chart-series-1: var(--color-brand-400);
+  --chart-series-2: var(--color-sky-400);
+  --chart-series-3: var(--color-amber-400);
+  --chart-series-4: var(--color-violet-400);
+}
+
 @layer base {
   html {
     /* Prevents iOS Safari from inflating text in landscape. */

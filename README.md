@@ -67,6 +67,126 @@ shared auth server:
 The frontend hides the Google button when these are unset, so the app runs fine
 without them.
 
+### Enabling course geocoding
+
+Set `NOMINATIM_URL` and a course's latitude and longitude fill themselves in
+from its address when it is saved. Leave it unset — the default — and both stay
+the hand-typed fields they have always been.
+
+The public OpenStreetMap instance is free and needs no account:
+
+```
+NOMINATIM_URL=https://nominatim.openstreetmap.org
+```
+
+Two things to know before you do. First, this is the only outbound call the
+course directory makes, and it sends course addresses to whoever runs that
+server. Second, it binds you to the
+[OSM usage policy](https://operations.osmfoundation.org/policies/nominatim/).
+Roundly holds up its end of that — one request per second, results cached, this
+instance identified in the `User-Agent` from `PUBLIC_URL`, and no geocoding at
+all on import, since restoring an account is exactly the bulk geocoding the
+policy forbids. If the directory gets busy, run your own Nominatim and point the
+same variable at it.
+
+Coordinates fill gaps and never overwrite: a course saved with a point keeps it.
+Clearing both fields and saving again is how you re-place a course that moved.
+
+### Enabling email
+
+Set `MAIL_FROM` plus exactly one transport and this instance can send mail,
+which switches on two features together: confirming an address at signup, and
+optional email two-factor on the profile screen. Leave it unset — the default —
+and neither is offered, which is how the app behaved before they existed.
+
+SMTP works with any mail server:
+
+```
+MAIL_FROM="Roundly <no-reply@your-domain.example>"
+SMTP_HOST=smtp.fastmail.com
+SMTP_PORT=587
+SMTP_USERNAME=you@example.com
+SMTP_PASSWORD=an-app-specific-password
+```
+
+Resend is the alternative, and the one to use on a host that blocks outbound
+587 — a great many do:
+
+```
+MAIL_FROM="Roundly <no-reply@your-domain.example>"
+RESEND_API_KEY=re_...
+```
+
+Configure both and Resend wins. `MAIL_FROM` has to be an address the transport
+is allowed to send as: a domain verified with Resend, or an address on the SMTP
+account you authenticate with. A half-filled configuration — a transport with no
+`MAIL_FROM`, credentials with no password — fails at boot rather than starting
+an instance whose mail silently goes nowhere.
+
+STARTTLS is used whenever the server offers it. A **remote** server that does
+not offer it is refused rather than sent your password in the clear; a loopback
+relay is exempt, since there is no network there to eavesdrop on.
+
+**What turning this on changes for existing accounts.** Nothing retroactive:
+`email_verified` is only ever set by opening a link, so accounts created before
+this existed start unconfirmed and are held at the confirm screen until they
+open one. On an instance with real users, expect to tell them.
+
+**Two-factor** is opt-in per account, guards the password path only (a Google
+sign-in has already been through Google's own second factor), and remembers a
+browser for 30 days so it is not asking every morning. Codes go to the address
+that also recovers the account, which makes it a defence against a stolen
+password rather than against a compromised mailbox — the profile screen says so
+in as many words.
+
+Turning it on mints **ten recovery codes**, shown exactly once. They are the way
+back in if the mailbox is gone, which on a self-hosted instance is otherwise a
+lost account: there is no administrator to appeal to. Each works once, they are
+stored argon2id-hashed so nobody can read them back, and a fresh sheet can be
+generated from the profile at any time (which retires the old one). Signing in
+with one is the "Can't access your email?" link on the code step.
+
+### Sign-in throttling
+
+Failed sign-ins are counted along two axes and refused with a `429` past either:
+
+```
+LOGIN_RATE_LIMIT=10     # failures per account per window
+LOGIN_RATE_WINDOW=15m   # the per-IP allowance is 3x the account limit
+```
+
+Both are needed. An account-only limit lets a botnet try one password against a
+million accounts; an IP-only limit lets a botnet grind one account. The per-IP
+allowance is the looser of the two because a household, an office, or a carrier
+NAT can put many legitimate people behind one address.
+
+**Only failures count.** A correct sign-in costs nothing, so somebody who knows
+their password is never locked out by their own traffic. The refusal is
+byte-identical whether or not the account exists, so it cannot be used to
+enumerate addresses.
+
+Account creation is capped separately, and counts differently:
+
+```
+SIGNUP_RATE_LIMIT=5     # accounts per address per window, successful or not
+SIGNUP_RATE_WINDOW=1h
+```
+
+**Signup counts successes too**, unlike sign-in. That is the whole difference
+between them: a successful sign-in is what the endpoint is for, whereas a
+successful *signup* is exactly what an abuser wants — filling an instance with
+junk accounts needs no failed attempts at all. Malformed attempts count as well,
+so probing which addresses are already registered is not free.
+
+There is only one axis here, the IP. The email address is chosen by whoever is
+signing up, so keying on it would hand every attacker a fresh bucket per
+attempt.
+
+Both limiters are memory-only and per-process. Restarting the server clears the
+counters, and running two instances behind a load balancer gives each its own —
+if you ever do that, the limits are effectively multiplied by the instance
+count.
+
 ### Enabling the course map
 
 Course detail pages can embed a Google Map of the course's address:
@@ -162,7 +282,7 @@ All routes are under `/api`. Everything except the auth endpoints below requires
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/courses?q=&limit=&offset=` | Paginated list with search |
+| `GET` | `/courses?q=&limit=&offset=` | Paginated list, caller's home course first then pinned; `q` matches the name and every part of the address |
 | `POST` | `/courses` | Create, optionally with tees and a hole count |
 | `GET` | `/courses/{id}` | Full detail: tees, holes, per-tee par and yardage |
 | `PUT` | `/courses/{id}` | Update name, address, and phone number |

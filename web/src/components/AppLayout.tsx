@@ -32,19 +32,29 @@ export function AppLayout() {
     <div className="flex min-h-full flex-col">
       <header className="no-print sticky top-0 z-20 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90">
         <div className="mx-auto flex max-w-5xl items-center gap-2 px-4 py-3">
-          <NavLink to="/courses" className="flex items-center gap-2 font-semibold tracking-tight">
+          <NavLink to="/overview" className="flex items-center gap-2 font-semibold tracking-tight">
             <span className="flex size-8 items-center justify-center rounded-lg bg-brand-600 text-white">
               <FlagIcon className="size-5" />
             </span>
             <span>Roundly</span>
           </NavLink>
 
+          {/* Ordered by how often somebody opens each one. The overview is the
+              landing screen and answers "how am I playing"; rounds is where the
+              work happens; the bag and the directory are reference material
+              visited when something changes. */}
           <nav className="ml-2 flex items-center gap-1">
-            <NavLink to="/courses" className={navLinkClass}>
-              Courses
+            <NavLink to="/overview" className={navLinkClass}>
+              Overview
+            </NavLink>
+            <NavLink to="/rounds" className={navLinkClass}>
+              Rounds
             </NavLink>
             <NavLink to="/bag" className={navLinkClass}>
               Bag
+            </NavLink>
+            <NavLink to="/courses" className={navLinkClass}>
+              Courses
             </NavLink>
           </nav>
 
