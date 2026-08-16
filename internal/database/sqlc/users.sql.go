@@ -37,6 +37,19 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 	return err
 }
 
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users WHERE id = ?
+`
+
+// Deleting a user relies entirely on the schema: clubs, API keys, OAuth links,
+// refresh tokens, and the avatar cascade away, and course attribution nulls
+// itself. courses.created_by was the one reference that made this impossible,
+// and migration 00012 released it.
+func (q *Queries) DeleteUser(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteUser, id)
+	return err
+}
+
 const deleteUserAvatar = `-- name: DeleteUserAvatar :exec
 DELETE FROM user_avatars WHERE user_id = ?
 `

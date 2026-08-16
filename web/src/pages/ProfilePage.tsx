@@ -15,6 +15,7 @@ import type { CourseSummary, DistanceUnit } from '../types'
 import { Avatar } from '../components/Avatar'
 import { ApiAccessSection } from '../components/ApiAccessSection'
 import { DataSection } from '../components/DataSection'
+import { DangerZone } from '../components/DangerZone'
 import {
   Alert,
   Field,
@@ -592,6 +593,8 @@ export default function ProfilePage() {
 
       {/* ---------- 4. API access ---------- */}
       <ApiAccessSection />
+
+      <DangerZone />
     </div>
   )
 }

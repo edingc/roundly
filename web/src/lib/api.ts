@@ -419,6 +419,10 @@ export const api = {
 
   deleteAvatar: () => request<User>('/account/avatar', { method: 'DELETE' }),
 
+  /** Erases the account. Irreversible; there is no undo endpoint. */
+  deleteAccount: (currentPassword: string) =>
+    request<void>('/account', { method: 'DELETE', body: { current_password: currentPassword } }),
+
   // ---- Data ----
 
   exportAccount: () => request<unknown>('/account/export'),

@@ -98,6 +98,39 @@ while the running server was open:
 - [ ] Revoke a key. Confirmation is required; afterwards the key returns 401.
 - [ ] Check the server log. It records the key's prefix and never the secret.
 
+### Courses are unowned
+
+- [ ] Sign in as a second user and edit a course the first one added — name, tees, and a
+      yardage. All allowed. There is no "read only" badge anywhere.
+- [ ] The course detail page offers **Request removal**, not Delete.
+- [ ] Send a request. It reports back that the administrator has been told.
+- [ ] Try to request removal of the same course again. Refused — one pending request at a time.
+
+### Administration
+
+Start the server with `ADMIN_EMAIL=you@example.com`.
+
+- [ ] Only that account sees **Administration** in the user menu.
+- [ ] `/admin` as anyone else redirects away; `curl` against it returns 403.
+- [ ] The queue shows the course, who asked, when, and why.
+- [ ] **Keep the course** clears the request and leaves the course alone.
+- [ ] **Remove it** asks for confirmation, then deletes the course.
+- [ ] After a removal, the course is gone but the request record survives with the course name
+      it was about. *(Check the database; this is the audit trail.)*
+- [ ] With `ADMIN_EMAIL` unset, nobody is an administrator: no menu entry, and both the queue
+      and `DELETE /api/courses/{id}` return 403 for everyone.
+
+### Deleting an account
+
+- [ ] The danger zone says plainly that courses stay in the directory.
+- [ ] The confirm button stays disabled until the email address is typed exactly.
+- [ ] A wrong password is refused and the account survives.
+- [ ] After deleting: signed out, the email can be used for a fresh signup, and the clubs, photo,
+      and API keys are gone.
+- [ ] **The course you added is still there, with no attribution** — and another player who had
+      it as their home course still has it. *(This is the cross-user damage the design exists to
+      prevent.)*
+
 ### Appearance and responsiveness
 
 - [ ] Walk all four sections in light and dark mode.

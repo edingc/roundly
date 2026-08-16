@@ -156,6 +156,7 @@ All routes are under `/api`. Everything except the auth endpoints below requires
 | `POST` | `/account/import` | Merge a JSON backup back in |
 | `GET` `POST` | `/account/keys` | List keys, or create one (the only response with a secret) |
 | `DELETE` | `/account/keys/{id}` | Revoke a key |
+| `DELETE` | `/account` | Delete the account; irreversible |
 
 **Courses** *(all require auth)*
 
@@ -165,7 +166,10 @@ All routes are under `/api`. Everything except the auth endpoints below requires
 | `POST` | `/courses` | Create, optionally with tees and a hole count |
 | `GET` | `/courses/{id}` | Full detail: tees, holes, per-tee par and yardage |
 | `PUT` | `/courses/{id}` | Update name, address, and phone number |
-| `DELETE` | `/courses/{id}` | Delete, cascading to tees, holes, and details |
+| `DELETE` | `/courses/{id}` | Remove a course — **administrator only** |
+| `POST` | `/courses/{id}/removal-request` | Ask the administrator to remove a course |
+| `GET` | `/admin/removal-requests` | The queue — administrator only |
+| `POST` | `/admin/removal-requests/{id}/resolve` | Settle one — administrator only |
 | `POST` | `/courses/{id}/tees` | Add a tee |
 | `PUT` `DELETE` | `/tees/{id}` | Update or delete a tee |
 | `POST` | `/courses/{id}/holes` | Add a hole |
@@ -199,10 +203,19 @@ putting a refresh token in a redirect URL leaks it into history, logs, and the
 that expires in two minutes and redirects to `/auth/callback?code=…`, which the
 app immediately trades for the real tokens over XHR.
 
-**Course permissions.** The directory is shared: any signed-in user can read any
-course, but only its creator can modify it. Responses carry `can_edit` so the UI
-does not have to re-derive the rule. This becomes a real permission model in
-Phase 8.
+**Nobody owns a course.** The directory is shared reference data: any signed-in
+user can read *and correct* any course. A golf course's yardages are objective
+facts about the world rather than one player's property, and tying edit rights to
+whoever typed them in first meant a wrong number could only ever be fixed by one
+person — who may never come back. `uploaded_by` records who entered a course and
+grants nothing; it goes null when that account is deleted.
+
+Removing a course is the exception, because it is the one irreversible act:
+it cascades away every tee, hole, par, and yardage with no history to restore
+from. So anyone may *request* a removal with a reason, and only the site
+administrator — the account named by `ADMIN_EMAIL` — can carry it out. The
+request record outlives the course, keeping `course_name` as a snapshot so it
+still says what was removed.
 
 **Club status is derived, not stored twice.** A club is `active` (in the bag),
 `benched` (owned, out of the bag), or `retired` (sold or replaced). Those come
@@ -290,6 +303,14 @@ output, so there is nothing to guess however fast the hash is, and running argon
 request would be a denial of service the server performs on itself. `last_used_at` is coalesced
 through a background flusher — at most one write per key per five minutes — so a read-only
 request never has to take the single write connection.
+
+**Deleting an account** erases the profile, photo, clubs, API keys, OAuth links,
+and sessions, and frees the email address for reuse. It needs the current
+password, or — for a Google-only account, which has no password to demand — a
+session less than five minutes old. Courses stay in the directory with the
+attribution removed, because other players depend on them and nobody owned them.
+That is only possible because `uploaded_by` is `ON DELETE SET NULL`; before that,
+a single uploaded course made an account permanently undeletable.
 
 **Export and import.** `GET /account/export` returns profile, clubs, and every course you
 created, with the avatar base64-embedded so a restore is actually complete. It excludes the

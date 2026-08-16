@@ -294,11 +294,68 @@ themselves to people, done early because "download my data" gets much harder to 
 
 ### Known gaps
 
-- **Account deletion is not possible,** and the schema is not ready for it: `courses.created_by`
-  has no `ON DELETE CASCADE`, unlike every other reference to `users`. "Download my data" is
-  exactly what makes people ask for "delete my account" next.
 - **A key cannot see Phase 3 rounds** until `/api/rounds` is added to the allow-list in
   `internal/apikey/policy.go`.
+
+---
+
+## 4c. UNOWNED COURSES, REMOVAL REQUESTS, AND ACCOUNT DELETION ✅
+
+Started as "let people delete their account", which turned out to be impossible:
+`courses.created_by` was the only reference to `users(id)` without an `ON DELETE` clause.
+Working out what *should* happen to those courses surfaced the real problem, and fixing that
+made deletion trivial.
+
+### Decisions made during implementation
+
+- **Nobody owns a course.** Attribution was doing double duty as authorization. A golf course is
+  objective real-world data, and tying edit rights to whoever entered it first meant a wrong
+  yardage could only be corrected by one person — who may never come back. `created_by` becomes
+  `uploaded_by`: attribution that grants nothing. `loadEditableCourse` collapses into
+  `loadCourse`; `can_edit` leaves the DTO along with the two read-only UI states.
+- **The column is nullable with `ON DELETE SET NULL`,** which is what makes account deletion a
+  plain `DELETE` with no course handling at all. The alternatives were worse: deleting the
+  courses silently blanks other players' home course, and freezing them leaves rows nobody can
+  ever edit again.
+- **First table rebuild in the project.** SQLite cannot alter a constraint, so the 12-step
+  procedure is the only route. It needs `foreign_keys=OFF`, which goose cannot toggle inside a
+  transaction — hence `-- +goose NO TRANSACTION` — and it ends with `PRAGMA foreign_key_check`,
+  because nothing else here would notice a violation.
+- **The risk was the scan, not the migration.** `uploaded_by` regenerates as `*string`, and
+  `ListCourses` scans every row of a page, so getting the pointer wrong fails the whole listing
+  rather than one course. That is what `TestCourseSurvivesItsUploader` exists to catch.
+- **Removing a course is an administrator action.** Unowning courses would otherwise have left
+  deletion available to everyone, which is the wrong end state: editing is recoverable by
+  editing again, deleting is not. Anyone may request a removal with a reason; only the
+  administrator settles it.
+- **The administrator is configuration, not schema.** `ADMIN_EMAIL` names the account, because
+  on a self-hosted instance the administrator is whoever runs the process, and an environment
+  value cannot drift out of step with the database or be edited through the app. Unset means no
+  administrator: requests queue, nothing is removed, everything else works.
+- **`RequireAdmin` reads the database rather than the token claim.** The email in an access
+  token is a snapshot, so trusting it would leave a 15-minute window where admin rights linger
+  after they should have gone. Every way of not being the administrator returns one identical
+  refusal, so nobody can probe for who is.
+- **Removal requests keep nullable foreign keys and a `course_name` snapshot** — the lesson from
+  `created_by`, applied immediately: a reference that cannot be released is one that blocks
+  deletion later. `course_id` nulls rather than cascading, so resolving a request by removing
+  the course leaves the record behind saying what was removed.
+- **Import now updates a course it names rather than forking a copy.** The fork only existed to
+  avoid touching someone else's property. Sharpened edge worth knowing: import is a destructive
+  sync, so a stale file drops tees and holes added since it was exported — already true for the
+  owner, now true for anyone, exactly as hand-editing is.
+- **Deletion reuses the email-change reauthentication rules exactly**: the current password, or
+  for a password-less Google account a session under five minutes old.
+
+### Known gaps
+
+- **An access token outlives deletion by up to 15 minutes.** `auth.Middleware` never reads the
+  database — it builds the principal from claims alone. Afterwards `GET /api/me` correctly 401s,
+  `GET /api/clubs` returns an empty bag with 200, and a write fails on a foreign key. Nothing
+  leaks, since the data is gone; it is merely confusing. Fixing it needs either a query per
+  request or a revocation list, neither worth it for that window.
+- **There is no undo and no grace period.** The confirmation is the only safety net, which is
+  why it demands both the password and the address typed out.
 
 ## 5. How to Use This Doc
 

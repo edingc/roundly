@@ -63,3 +63,10 @@ WHERE u.avatar_key = ?;
 
 -- name: GetAvatarByUser :one
 SELECT * FROM user_avatars WHERE user_id = ?;
+
+-- Deleting a user relies entirely on the schema: clubs, API keys, OAuth links,
+-- refresh tokens, and the avatar cascade away, and course attribution nulls
+-- itself. courses.created_by was the one reference that made this impossible,
+-- and migration 00012 released it.
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = ?;

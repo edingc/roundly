@@ -43,6 +43,10 @@ func (h *Handler) Register(r chi.Router) {
 		ar.Delete("/avatar", h.deleteAvatar)
 		ar.Get("/export", h.export)
 		ar.Post("/import", h.importAccount)
+		// Registered inside this block rather than as a separate
+		// r.Delete("/account", …): internal/apikey mounts /account/keys on the
+		// same router, and the two would collide.
+		ar.Delete("/", h.deleteAccount)
 	})
 }
 
@@ -219,4 +223,24 @@ func (h *Handler) importAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	// 200, not 201: a merge that skipped everything created nothing.
 	httpx.JSON(w, http.StatusOK, summary)
+}
+
+type deleteAccountBody struct {
+	CurrentPassword string `json:"current_password"`
+}
+
+func (h *Handler) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	var req deleteAccountBody
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+
+	ctx := r.Context()
+	principal, _ := auth.PrincipalFrom(ctx)
+	if err := h.service.DeleteAccount(ctx, auth.MustUserID(ctx), req.CurrentPassword, principal.IssuedAt); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.NoContent(w)
 }

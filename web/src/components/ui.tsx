@@ -124,6 +124,8 @@ export function ConfirmDialog({
   message,
   confirmLabel = 'Delete',
   danger = true,
+  requireTyped,
+  extra,
   onCancel,
   onConfirm,
 }: {
@@ -131,11 +133,25 @@ export function ConfirmDialog({
   message: ReactNode
   confirmLabel?: string
   danger?: boolean
+  /**
+   * Demands the user type an exact value before confirming. For the handful of
+   * actions where a click, even a deliberate one, is too cheap a gesture for
+   * what it does.
+   */
+  requireTyped?: { label: string; value: string; hint?: string }
+  /** Extra fields rendered above the buttons, e.g. a password challenge. */
+  extra?: ReactNode
   onCancel: () => void
   onConfirm: () => Promise<void>
 }) {
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [typed, setTyped] = useState('')
+
+  // Compared case-insensitively after trimming: the point is to make the user
+  // stop and read, not to test their typing.
+  const typedOk =
+    !requireTyped || typed.trim().toLowerCase() === requireTyped.value.trim().toLowerCase()
 
   async function handleConfirm() {
     setConfirming(true)
@@ -158,6 +174,21 @@ export function ConfirmDialog({
       <div className="card max-h-[90vh] w-full max-w-md overflow-y-auto rounded-b-none p-6 sm:rounded-xl">
         <h2 className="mb-2 text-lg font-semibold">{title}</h2>
         <p className="text-sm text-slate-600 dark:text-slate-400">{message}</p>
+        {extra && <div className="mt-4">{extra}</div>}
+
+        {requireTyped && (
+          <div className="mt-4">
+            <Field
+              id="confirm-typed"
+              label={requireTyped.label}
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              hint={requireTyped.hint}
+              autoComplete="off"
+            />
+          </div>
+        )}
+
         {error && (
           <div className="mt-4">
             <Alert>{error}</Alert>
@@ -175,7 +206,7 @@ export function ConfirmDialog({
           <button
             type="button"
             onClick={() => void handleConfirm()}
-            disabled={confirming}
+            disabled={confirming || !typedOk}
             className={cx('flex-1', danger ? 'btn-danger' : 'btn-primary')}
           >
             {confirming ? <Spinner label="Working" /> : confirmLabel}

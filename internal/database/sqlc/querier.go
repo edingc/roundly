@@ -31,6 +31,11 @@ type Querier interface {
 	DeleteHoleTeeDetail(ctx context.Context, arg DeleteHoleTeeDetailParams) error
 	DeleteOAuthAccount(ctx context.Context, arg DeleteOAuthAccountParams) error
 	DeleteTee(ctx context.Context, id string) error
+	// Deleting a user relies entirely on the schema: clubs, API keys, OAuth links,
+	// refresh tokens, and the avatar cascade away, and course attribution nulls
+	// itself. courses.created_by was the one reference that made this impossible,
+	// and migration 00012 released it.
+	DeleteUser(ctx context.Context, id string) error
 	DeleteUserAvatar(ctx context.Context, userID string) error
 	// The authentication lookup. Equality on an indexed hash, not on the secret:
 	// there is nothing here to compare in constant time, because the value in the

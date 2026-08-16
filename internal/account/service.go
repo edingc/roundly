@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,13 +19,13 @@ import (
 )
 
 // reauthWindow is how recently a password-less account must have signed in
-// before it may change its email address.
+// before it may change its email address or delete itself.
 //
 // An account with a password proves itself by typing that password. One created
 // through Google has nothing to type, so without this an access token alone
-// would be enough to move the account to an attacker's address — which, once
-// password reset ships, is a complete takeover. Requiring a fresh token means
-// the SPA sends the user back through Google, which is the same proof.
+// would be enough to move the account to an attacker's address — or erase it.
+// Requiring a fresh token means the SPA sends the user back through Google,
+// which is the same proof.
 const reauthWindow = 5 * time.Minute
 
 // Service implements the account use cases. Every method takes the caller's own
@@ -147,4 +149,52 @@ func (s *Service) reload(ctx context.Context, userID string) (*auth.User, error)
 		return nil, err
 	}
 	return user, nil
+}
+
+// DeleteAccount erases the caller's account.
+//
+// The reauthentication rules are exactly ChangeEmail's, and for the same
+// reason: this is irreversible, and an unattended session should not be enough
+// to trigger it. An account with a password types it; one created through
+// Google has nothing to type, so it must instead have signed in recently.
+//
+// The deletion itself is a single statement. Clubs, API keys, OAuth links,
+// refresh tokens, and the avatar all cascade, and the courses this person
+// uploaded keep their rows with the attribution nulled — they are shared
+// reference data that other players depend on, and nobody owned them anyway.
+func (s *Service) DeleteAccount(ctx context.Context, userID, currentPassword string, issuedAt time.Time) error {
+	row, err := s.db.Queries.GetUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return httpx.Unauthorized("Your session is no longer valid.")
+		}
+		return httpx.Internal(fmt.Errorf("load user: %w", err))
+	}
+
+	hasPassword := row.PasswordHash != nil && *row.PasswordHash != ""
+	if hasPassword {
+		if strings.TrimSpace(currentPassword) == "" {
+			return httpx.ValidationError(map[string]string{
+				"current_password": "Enter your current password.",
+			})
+		}
+		if err := auth.VerifyPassword(currentPassword, *row.PasswordHash); err != nil {
+			return httpx.ValidationError(map[string]string{
+				"current_password": "That password is incorrect.",
+			})
+		}
+	} else if time.Since(issuedAt) > reauthWindow {
+		return &httpx.APIError{
+			Status:  http.StatusForbidden,
+			Code:    "reauthentication_required",
+			Message: "Sign in again before deleting your account.",
+		}
+	}
+
+	if err := s.db.Queries.DeleteUser(ctx, userID); err != nil {
+		return httpx.Internal(fmt.Errorf("delete user: %w", err))
+	}
+
+	slog.Info("account deleted", "user_id", userID)
+	return nil
 }
