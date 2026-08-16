@@ -188,6 +188,21 @@ Start the server with `ADMIN_EMAIL=you@example.com`.
 - [ ] Changing the password forgets every remembered browser.
 - [ ] Turning two-factor off asks for the password, and sign-in goes straight through afterwards.
 
+### Where an unauthenticated visitor lands
+
+*Test the first two in a browser that has never signed in — a private window is
+the quickest way.*
+
+- [ ] A brand-new browser opening the app lands on **Sign up**, not Sign in.
+- [ ] Signing up, then signing out, then reopening the app lands on **Sign in**.
+      *(Having an account is not a reason to be asked to make another.)*
+- [ ] Letting the session expire, or having it revoked from another device,
+      also lands on **Sign in**.
+- [ ] `/login` and `/signup` still work when typed directly, and each links to
+      the other.
+- [ ] Deleting the account lands on **Sign up**, and reopening the app after
+      that still offers Sign up.
+
 ### Course ratings
 
 - [ ] The control is in **Preferences**, not Personal information.

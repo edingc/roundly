@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ApiError, api, setSession } from '../lib/api'
+import { ApiError, api, clearSignedInBefore, setSession } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import { Alert, ConfirmDialog, Field, WarningIcon } from './ui'
 
@@ -31,8 +31,11 @@ export function DangerZone() {
       // The account is gone; drop the local session without calling logout,
       // which would now fail against a user that no longer exists.
       setSession(null)
+      // And forget that anybody ever signed in here, so the next visit offers
+      // to create an account rather than a login form for one that is gone.
+      clearSignedInBefore()
       await logOut().catch(() => {})
-      navigate('/login', { replace: true })
+      navigate('/signup', { replace: true })
     } catch (err) {
       const message =
         err instanceof ApiError

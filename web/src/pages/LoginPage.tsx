@@ -200,7 +200,7 @@ export default function LoginPage() {
 
   return (
     <AuthShell
-      title="Welcome"
+      title="Welcome back"
       subtitle="Please sign in."
       footer={
         <>

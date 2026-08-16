@@ -45,6 +45,21 @@ const REFRESH_TOKEN_KEY = 'roundly.refresh_token'
 const DEVICE_TOKEN_KEY = 'roundly.device_token'
 
 /**
+ * Whether anybody has ever signed in successfully in this browser.
+ *
+ * It decides which screen an unauthenticated visitor lands on, and nothing
+ * else. A fresh instance should open on "create an account" rather than on a
+ * login form for an account that does not exist; somebody whose session simply
+ * expired should not be asked to make a second one.
+ *
+ * Deliberately *not* cleared by setSession(null), unlike every other stored
+ * value here. Signing out, an expired refresh token, and a revoked session all
+ * leave the account intact, so all three should still land on the login form.
+ * Only deleting the account clears it.
+ */
+const SIGNED_IN_BEFORE_KEY = 'roundly.has_signed_in'
+
+/**
  * ApiError carries the server's error envelope so callers can show the message
  * and attach `fields` to the inputs that failed.
  */
@@ -108,8 +123,37 @@ export function getStoredRefreshToken(): string | null {
   }
 }
 
+/** True once anybody has signed in here. See SIGNED_IN_BEFORE_KEY. */
+export function hasSignedInBefore(): boolean {
+  try {
+    return localStorage.getItem(SIGNED_IN_BEFORE_KEY) === '1'
+  } catch {
+    // Storage refused, so treat this as a first visit. Landing a returning
+    // user on signup is a click of friction; landing a new one on a login
+    // form for an account they do not have is a dead end.
+    return false
+  }
+}
+
+/** Forgets that anybody has signed in. Only account deletion should call this. */
+export function clearSignedInBefore(): void {
+  try {
+    localStorage.removeItem(SIGNED_IN_BEFORE_KEY)
+  } catch {
+    // Nothing to do: the flag only chooses a landing screen.
+  }
+}
+
 export function setSession(session: Session | null): void {
   accessToken = session?.access_token ?? null
+  if (session) {
+    try {
+      localStorage.setItem(SIGNED_IN_BEFORE_KEY, '1')
+    } catch {
+      // Private browsing. The visitor lands on signup next time, which is
+      // recoverable in one click.
+    }
+  }
   // Only ever written, never cleared from here: the field is absent on every
   // refresh, and treating absent as "forget this device" would un-trust the
   // browser fifteen minutes after it was trusted.

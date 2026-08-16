@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useAuth } from './lib/auth'
+import { hasSignedInBefore } from './lib/api'
 import { AppLayout } from './components/AppLayout'
 import { PageSpinner } from './components/ui'
 import LoginPage from './pages/LoginPage'
@@ -21,7 +22,15 @@ import YardageChartPage from './pages/YardageChartPage'
 import ProfilePage from './pages/ProfilePage'
 import AdminPage from './pages/AdminPage'
 
-/** Sends unauthenticated visitors to the login screen, remembering where they were. */
+/**
+ * Sends unauthenticated visitors to sign up or sign in, remembering where they
+ * were.
+ *
+ * Signup is the default because a freshly deployed instance has no accounts,
+ * and a login form is a dead end for the person who just installed it. A
+ * browser that has signed in before goes to the login form instead: an expired
+ * session is not a reason to ask somebody to create a second account.
+ */
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading, emailVerificationRequired } = useAuth()
   const location = useLocation()
@@ -29,7 +38,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
   if (loading) return <PageSpinner label="Restoring your session" />
   if (!user) {
     const returnTo = `${location.pathname}${location.search}`
-    return <Navigate to="/login" state={{ returnTo }} replace />
+    return <Navigate to={hasSignedInBefore() ? '/login' : '/signup'} state={{ returnTo }} replace />
   }
   // The server refuses every application endpoint for an unconfirmed account,
   // so rendering the app here would only produce a screen of failed requests.

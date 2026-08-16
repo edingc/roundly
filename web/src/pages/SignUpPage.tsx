@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../lib/auth'
 import { ApiError, googleLoginUrl } from '../lib/api'
 import { AuthShell, OrDivider } from '../components/AuthShell'
@@ -8,6 +8,12 @@ import { Alert, Field, GoogleIcon, Spinner } from '../components/ui'
 export default function SignUpPage() {
   const { signUp, googleEnabled } = useAuth()
   const [searchParams] = useSearchParams()
+  const location = useLocation()
+
+  // Where the visitor was headed before being asked to sign in. Only the Google
+  // button needs it: the password path lands on the overview through
+  // RedirectIfSignedIn once the user is set.
+  const returnTo = (location.state as { returnTo?: string } | null)?.returnTo ?? '/overview'
 
   const [displayName, setDisplayName] = useState('')
   const [email, setEmail] = useState('')
@@ -39,8 +45,8 @@ export default function SignUpPage() {
 
   return (
     <AuthShell
-      title="Create your account"
-      subtitle="Start building your course library."
+      title="Create your Roundly account"
+      subtitle="Your rounds. Your stats. Your game."
       footer={
         <>
           Already have an account?{' '}
@@ -61,7 +67,7 @@ export default function SignUpPage() {
 
       {googleEnabled && (
         <>
-          <a href={googleLoginUrl('/courses')} className="btn-secondary w-full">
+          <a href={googleLoginUrl(returnTo)} className="btn-secondary w-full">
             <GoogleIcon className="size-5" />
             Continue with Google
           </a>
