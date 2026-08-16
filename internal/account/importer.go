@@ -139,7 +139,7 @@ func (s *Service) importProfile(ctx context.Context, userID string, p ProfileExp
 	// IDs are not portable.
 	homeCourse := row.HomeCourseID
 	if homeCourse == nil && p.HomeCourseName != nil {
-		if courses, err := s.db.Queries.ListCoursesByCreator(ctx, userID); err == nil {
+		if courses, err := s.db.Queries.ListCoursesByUploader(ctx, &userID); err == nil {
 			for _, c := range courses {
 				if strings.EqualFold(strings.TrimSpace(c.Name), strings.TrimSpace(*p.HomeCourseName)) {
 					courseID := c.ID
@@ -258,7 +258,7 @@ func (s *Service) importClubs(ctx context.Context, userID string, clubs []ClubEx
 // someone else owns with the same name does not block anything; the user gets
 // their own copy, which the schema allows.
 func (s *Service) importCourses(ctx context.Context, userID string, courses []course.CourseExport, summary *ImportSummary) error {
-	existing, err := s.db.Queries.ListCoursesByCreator(ctx, userID)
+	existing, err := s.db.Queries.ListCoursesByUploader(ctx, &userID)
 	if err != nil {
 		return httpx.Internal(fmt.Errorf("list courses: %w", err))
 	}

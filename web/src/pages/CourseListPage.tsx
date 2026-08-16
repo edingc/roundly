@@ -187,11 +187,6 @@ export default function CourseListPage() {
                         Pinned
                       </span>
                     )}
-                    {!course.can_edit && (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                        Read only
-                      </span>
-                    )}
                   </div>
                 </div>
                 {/* Always rendered, even without an address, so every card

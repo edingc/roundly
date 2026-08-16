@@ -80,7 +80,7 @@ type teeDetailExport struct {
 // can be imported back into this or another instance.
 func (h *Handler) export(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	detail, err := h.service.Get(ctx, auth.MustUserID(ctx), chi.URLParam(r, "courseID"))
+	detail, err := h.service.Get(ctx, chi.URLParam(r, "courseID"))
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -286,26 +286,26 @@ func buildExport(detail *CourseDetail) CourseExport {
 // queries a course, and the pool holds a single connection, so a sixty-course
 // account export would otherwise be a hundred and eighty sequential round trips
 // inside the server's thirty-second request timeout.
-func (s *Service) ExportAll(ctx context.Context, creatorID string) ([]CourseExport, error) {
-	courseRows, err := s.db.Queries.ListCoursesByCreator(ctx, creatorID)
+func (s *Service) ExportAll(ctx context.Context, uploaderID string) ([]CourseExport, error) {
+	courseRows, err := s.db.Queries.ListCoursesByUploader(ctx, &uploaderID)
 	if err != nil {
-		return nil, httpx.Internal(fmt.Errorf("list courses by creator: %w", err))
+		return nil, httpx.Internal(fmt.Errorf("list courses by uploader: %w", err))
 	}
 	if len(courseRows) == 0 {
 		return []CourseExport{}, nil
 	}
 
-	teeRows, err := s.db.Queries.ListTeesByCreator(ctx, creatorID)
+	teeRows, err := s.db.Queries.ListTeesByUploader(ctx, &uploaderID)
 	if err != nil {
-		return nil, httpx.Internal(fmt.Errorf("list tees by creator: %w", err))
+		return nil, httpx.Internal(fmt.Errorf("list tees by uploader: %w", err))
 	}
-	holeRows, err := s.db.Queries.ListHolesByCreator(ctx, creatorID)
+	holeRows, err := s.db.Queries.ListHolesByUploader(ctx, &uploaderID)
 	if err != nil {
-		return nil, httpx.Internal(fmt.Errorf("list holes by creator: %w", err))
+		return nil, httpx.Internal(fmt.Errorf("list holes by uploader: %w", err))
 	}
-	detailRows, err := s.db.Queries.ListHoleTeeDetailsByCreator(ctx, creatorID)
+	detailRows, err := s.db.Queries.ListHoleTeeDetailsByUploader(ctx, &uploaderID)
 	if err != nil {
-		return nil, httpx.Internal(fmt.Errorf("list hole tee details by creator: %w", err))
+		return nil, httpx.Internal(fmt.Errorf("list hole tee details by uploader: %w", err))
 	}
 
 	teesByCourse := make(map[string][]sqlc.Tee, len(courseRows))
@@ -345,7 +345,7 @@ func (s *Service) ExportAll(ctx context.Context, creatorID string) ([]CourseExpo
 			holes = append(holes, toHole(h, details))
 		}
 
-		course := toCourse(row, creatorID)
+		course := toCourse(row)
 		course.HoleCount = len(holes)
 		course.TeeCount = len(tees)
 		out = append(out, buildExport(&CourseDetail{Course: course, Tees: tees, Holes: holes}))

@@ -22,9 +22,14 @@ const MaxHoleNumber = 18
 
 // Service implements the course directory use cases.
 //
-// Courses are a shared directory: any signed-in user can read any course, but
-// only the user who created it can modify it. Phase 8 (multi-tenant) is where
-// this becomes a real permission model.
+// Courses are shared reference data, and nobody owns one. Any signed-in user can
+// read any course and correct any course: a golf course's yardages are objective
+// facts about the world, not one player's property, and tying edit rights to
+// whoever typed them in first left wrong numbers uncorrectable by everyone else.
+//
+// uploaded_by records who entered a course and grants nothing. Removing a course
+// is the one destructive act, so it is not a user action at all — see the
+// removal-request flow and RequireAdmin.
 type Service struct {
 	db *database.DB
 }
@@ -35,7 +40,7 @@ func NewService(db *database.DB) *Service {
 
 // List returns a page of courses, optionally filtered by a search term matched
 // against name and address.
-func (s *Service) List(ctx context.Context, viewerID, search string, limit, offset int) (*Page, error) {
+func (s *Service) List(ctx context.Context, search string, limit, offset int) (*Page, error) {
 	search = strings.TrimSpace(search)
 
 	var (
@@ -75,7 +80,7 @@ func (s *Service) List(ctx context.Context, viewerID, search string, limit, offs
 
 	items := make([]Course, 0, len(rows))
 	for _, row := range rows {
-		item := toCourse(row, viewerID)
+		item := toCourse(row)
 
 		// The list cards show how complete each course is. These are small
 		// per-row reads; if the directory grows large enough for this to matter,
@@ -98,15 +103,15 @@ func (s *Service) List(ctx context.Context, viewerID, search string, limit, offs
 }
 
 // Get returns a course with its tees, holes, and per-tee hole details.
-func (s *Service) Get(ctx context.Context, viewerID, courseID string) (*CourseDetail, error) {
+func (s *Service) Get(ctx context.Context, courseID string) (*CourseDetail, error) {
 	row, err := s.loadCourse(ctx, courseID)
 	if err != nil {
 		return nil, err
 	}
-	return s.detail(ctx, row, viewerID)
+	return s.detail(ctx, row)
 }
 
-func (s *Service) detail(ctx context.Context, row sqlc.Course, viewerID string) (*CourseDetail, error) {
+func (s *Service) detail(ctx context.Context, row sqlc.Course) (*CourseDetail, error) {
 	teeRows, err := s.db.Queries.ListTeesByCourse(ctx, row.ID)
 	if err != nil {
 		return nil, httpx.Internal(fmt.Errorf("list tees: %w", err))
@@ -146,7 +151,7 @@ func (s *Service) detail(ctx context.Context, row sqlc.Course, viewerID string) 
 		holes = append(holes, toHole(h, details))
 	}
 
-	course := toCourse(row, viewerID)
+	course := toCourse(row)
 	course.HoleCount = len(holes)
 	course.TeeCount = len(tees)
 
@@ -220,7 +225,7 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 			Latitude:     in.Latitude,
 			Longitude:    in.Longitude,
 			Pinned:       pinned,
-			CreatedBy:    creatorID,
+			UploadedBy:   &creatorID,
 			CreatedAt:    now,
 			UpdatedAt:    now,
 		}); err != nil {
@@ -257,7 +262,7 @@ func (s *Service) Create(ctx context.Context, creatorID string, in CreateCourseI
 	if err != nil {
 		return nil, err
 	}
-	return s.detail(ctx, row, creatorID)
+	return s.detail(ctx, row)
 }
 
 // ImportTeeDetailInput is one hole's par and yardage for one named tee, from
@@ -301,16 +306,18 @@ type ImportCourseInput struct {
 // are not stable across app instances.
 func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseInput) (*CourseDetail, error) {
 	// Decide whether to update an existing course or create a new one.
+	//
+	// This used to require that the importer had uploaded the course. Nobody
+	// owns a course any more, and anyone may edit one, so an import that names
+	// an existing course updates it — which is exactly what editing it by hand
+	// would do. A course the file does not name still gets a fresh ID.
 	courseID := id.New()
 	update := false
 	if in.ID != "" {
-		existing, err := s.db.Queries.GetCourse(ctx, in.ID)
-		if err == nil && existing.CreatedBy == creatorID {
+		if existing, err := s.db.Queries.GetCourse(ctx, in.ID); err == nil {
 			courseID = existing.ID
 			update = true
 		}
-		// If the course doesn't exist or belongs to someone else, fall
-		// through to create with a fresh ID.
 	}
 
 	now := timex.Now()
@@ -346,7 +353,7 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 				Latitude:     in.Latitude,
 				Longitude:    in.Longitude,
 				Pinned:       0,
-				CreatedBy:    creatorID,
+				UploadedBy:   &creatorID,
 				CreatedAt:    now,
 				UpdatedAt:    now,
 			}); err != nil {
@@ -502,7 +509,7 @@ func (s *Service) Import(ctx context.Context, creatorID string, in ImportCourseI
 	if err != nil {
 		return nil, err
 	}
-	return s.detail(ctx, row, creatorID)
+	return s.detail(ctx, row)
 }
 
 // UpdateCourseInput is the payload for updating course-level fields.
@@ -519,7 +526,7 @@ type UpdateCourseInput struct {
 }
 
 func (s *Service) Update(ctx context.Context, editorID, courseID string, in UpdateCourseInput) (*CourseDetail, error) {
-	row, err := s.loadEditableCourse(ctx, editorID, courseID)
+	row, err := s.loadCourse(ctx, courseID)
 	if err != nil {
 		return nil, err
 	}
@@ -548,12 +555,12 @@ func (s *Service) Update(ctx context.Context, editorID, courseID string, in Upda
 	if err != nil {
 		return nil, err
 	}
-	return s.detail(ctx, updated, editorID)
+	return s.detail(ctx, updated)
 }
 
 // Delete removes a course; tees, holes, and hole details cascade.
 func (s *Service) Delete(ctx context.Context, editorID, courseID string) error {
-	row, err := s.loadEditableCourse(ctx, editorID, courseID)
+	row, err := s.loadCourse(ctx, courseID)
 	if err != nil {
 		return err
 	}
@@ -565,7 +572,7 @@ func (s *Service) Delete(ctx context.Context, editorID, courseID string) error {
 
 // AddTee appends a tee to a course.
 func (s *Service) AddTee(ctx context.Context, editorID, courseID string, in TeeInput) (*Tee, error) {
-	if _, err := s.loadEditableCourse(ctx, editorID, courseID); err != nil {
+	if _, err := s.loadCourse(ctx, courseID); err != nil {
 		return nil, err
 	}
 
@@ -603,7 +610,7 @@ func (s *Service) UpdateTee(ctx context.Context, editorID, teeID string, in TeeI
 		}
 		return nil, httpx.Internal(fmt.Errorf("load tee: %w", err))
 	}
-	if _, err := s.loadEditableCourse(ctx, editorID, row.CourseID); err != nil {
+	if _, err := s.loadCourse(ctx, row.CourseID); err != nil {
 		return nil, err
 	}
 
@@ -656,7 +663,7 @@ func (s *Service) DeleteTee(ctx context.Context, editorID, teeID string) error {
 		}
 		return httpx.Internal(fmt.Errorf("load tee: %w", err))
 	}
-	if _, err := s.loadEditableCourse(ctx, editorID, row.CourseID); err != nil {
+	if _, err := s.loadCourse(ctx, row.CourseID); err != nil {
 		return err
 	}
 	if err := s.db.Queries.DeleteTee(ctx, teeID); err != nil {
@@ -674,7 +681,7 @@ type HoleInput struct {
 
 // AddHole creates a single hole on a course.
 func (s *Service) AddHole(ctx context.Context, editorID, courseID string, in HoleInput) (*Hole, error) {
-	if _, err := s.loadEditableCourse(ctx, editorID, courseID); err != nil {
+	if _, err := s.loadCourse(ctx, courseID); err != nil {
 		return nil, err
 	}
 
@@ -721,7 +728,7 @@ func (s *Service) UpdateHole(ctx context.Context, editorID, holeID string, in Ho
 		}
 		return nil, httpx.Internal(fmt.Errorf("load hole: %w", err))
 	}
-	if _, err := s.loadEditableCourse(ctx, editorID, row.CourseID); err != nil {
+	if _, err := s.loadCourse(ctx, row.CourseID); err != nil {
 		return nil, err
 	}
 
@@ -760,7 +767,7 @@ func (s *Service) DeleteHole(ctx context.Context, editorID, holeID string) error
 		}
 		return httpx.Internal(fmt.Errorf("load hole: %w", err))
 	}
-	if _, err := s.loadEditableCourse(ctx, editorID, row.CourseID); err != nil {
+	if _, err := s.loadCourse(ctx, row.CourseID); err != nil {
 		return err
 	}
 	if err := s.db.Queries.DeleteHole(ctx, holeID); err != nil {
@@ -780,7 +787,7 @@ func (s *Service) SetTeeDetail(ctx context.Context, editorID, holeID, teeID stri
 		}
 		return nil, httpx.Internal(fmt.Errorf("load hole: %w", err))
 	}
-	if _, err := s.loadEditableCourse(ctx, editorID, hole.CourseID); err != nil {
+	if _, err := s.loadCourse(ctx, hole.CourseID); err != nil {
 		return nil, err
 	}
 
@@ -825,7 +832,7 @@ func (s *Service) ClearTeeDetail(ctx context.Context, editorID, holeID, teeID st
 		}
 		return httpx.Internal(fmt.Errorf("load hole: %w", err))
 	}
-	if _, err := s.loadEditableCourse(ctx, editorID, hole.CourseID); err != nil {
+	if _, err := s.loadCourse(ctx, hole.CourseID); err != nil {
 		return err
 	}
 	if err := s.db.Queries.DeleteHoleTeeDetail(ctx, sqlc.DeleteHoleTeeDetailParams{
@@ -874,18 +881,6 @@ func (s *Service) loadCourse(ctx context.Context, courseID string) (sqlc.Course,
 			return sqlc.Course{}, httpx.NotFound("That course does not exist.")
 		}
 		return sqlc.Course{}, httpx.Internal(fmt.Errorf("load course: %w", err))
-	}
-	return row, nil
-}
-
-// loadEditableCourse loads a course and enforces that the caller created it.
-func (s *Service) loadEditableCourse(ctx context.Context, editorID, courseID string) (sqlc.Course, error) {
-	row, err := s.loadCourse(ctx, courseID)
-	if err != nil {
-		return sqlc.Course{}, err
-	}
-	if row.CreatedBy != editorID {
-		return sqlc.Course{}, httpx.Forbidden("Only the person who added this course can change it.")
 	}
 	return row, nil
 }

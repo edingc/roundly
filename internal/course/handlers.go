@@ -89,7 +89,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	offset := httpx.QueryInt(r, "offset", 0, 0, 1_000_000)
 	search := r.URL.Query().Get("q")
 
-	page, err := h.service.List(ctx, auth.MustUserID(ctx), search, limit, offset)
+	page, err := h.service.List(ctx, search, limit, offset)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -99,7 +99,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	detail, err := h.service.Get(ctx, auth.MustUserID(ctx), chi.URLParam(r, "courseID"))
+	detail, err := h.service.Get(ctx, chi.URLParam(r, "courseID"))
 	if err != nil {
 		httpx.Error(w, r, err)
 		return

@@ -41,7 +41,7 @@ type Course struct {
 	ID           string
 	Name         string
 	Address      *string
-	CreatedBy    string
+	UploadedBy   *string
 	CreatedAt    string
 	UpdatedAt    string
 	Phone        *string

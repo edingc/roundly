@@ -1,5 +1,5 @@
 -- name: CreateCourse :exec
-INSERT INTO courses (id, name, address, phone, website, notes, facility_type, latitude, longitude, pinned, created_by, created_at, updated_at)
+INSERT INTO courses (id, name, address, phone, website, notes, facility_type, latitude, longitude, pinned, uploaded_by, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetCourse :one
@@ -38,9 +38,9 @@ UPDATE courses SET updated_at = ? WHERE id = ?;
 -- name: DeleteCourse :exec
 DELETE FROM courses WHERE id = ?;
 
--- Every course this user created, for the account export. Backed by
--- idx_courses_created_by.
--- name: ListCoursesByCreator :many
+-- Every course this user uploaded, for the account export. Backed by
+-- idx_courses_uploaded_by.
+-- name: ListCoursesByUploader :many
 SELECT * FROM courses
-WHERE created_by = ?
+WHERE uploaded_by = ?
 ORDER BY name COLLATE NOCASE ASC;

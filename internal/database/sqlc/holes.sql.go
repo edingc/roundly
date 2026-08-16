@@ -149,16 +149,12 @@ func (q *Queries) ListHoleTeeDetailsByCourse(ctx context.Context, courseID strin
 	return items, nil
 }
 
-const listHoleTeeDetailsByCreator = `-- name: ListHoleTeeDetailsByCreator :many
-SELECT d.id, d.hole_id, d.tee_id, d.par, d.yardage FROM hole_tee_details d
-JOIN holes h ON h.id = d.hole_id
-JOIN courses c ON c.id = h.course_id
-WHERE c.created_by = ?
-ORDER BY h.course_id ASC, h.hole_number ASC
+const listHoleTeeDetailsByHole = `-- name: ListHoleTeeDetailsByHole :many
+SELECT id, hole_id, tee_id, par, yardage FROM hole_tee_details WHERE hole_id = ?
 `
 
-func (q *Queries) ListHoleTeeDetailsByCreator(ctx context.Context, createdBy string) ([]HoleTeeDetail, error) {
-	rows, err := q.db.QueryContext(ctx, listHoleTeeDetailsByCreator, createdBy)
+func (q *Queries) ListHoleTeeDetailsByHole(ctx context.Context, holeID string) ([]HoleTeeDetail, error) {
+	rows, err := q.db.QueryContext(ctx, listHoleTeeDetailsByHole, holeID)
 	if err != nil {
 		return nil, err
 	}
@@ -186,12 +182,16 @@ func (q *Queries) ListHoleTeeDetailsByCreator(ctx context.Context, createdBy str
 	return items, nil
 }
 
-const listHoleTeeDetailsByHole = `-- name: ListHoleTeeDetailsByHole :many
-SELECT id, hole_id, tee_id, par, yardage FROM hole_tee_details WHERE hole_id = ?
+const listHoleTeeDetailsByUploader = `-- name: ListHoleTeeDetailsByUploader :many
+SELECT d.id, d.hole_id, d.tee_id, d.par, d.yardage FROM hole_tee_details d
+JOIN holes h ON h.id = d.hole_id
+JOIN courses c ON c.id = h.course_id
+WHERE c.uploaded_by = ?
+ORDER BY h.course_id ASC, h.hole_number ASC
 `
 
-func (q *Queries) ListHoleTeeDetailsByHole(ctx context.Context, holeID string) ([]HoleTeeDetail, error) {
-	rows, err := q.db.QueryContext(ctx, listHoleTeeDetailsByHole, holeID)
+func (q *Queries) ListHoleTeeDetailsByUploader(ctx context.Context, uploadedBy *string) ([]HoleTeeDetail, error) {
+	rows, err := q.db.QueryContext(ctx, listHoleTeeDetailsByUploader, uploadedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -251,16 +251,16 @@ func (q *Queries) ListHolesByCourse(ctx context.Context, courseID string) ([]Hol
 	return items, nil
 }
 
-const listHolesByCreator = `-- name: ListHolesByCreator :many
+const listHolesByUploader = `-- name: ListHolesByUploader :many
 SELECT h.id, h.course_id, h.hole_number, h.handicap_index FROM holes h
 JOIN courses c ON c.id = h.course_id
-WHERE c.created_by = ?
+WHERE c.uploaded_by = ?
 ORDER BY h.course_id ASC, h.hole_number ASC
 `
 
-// Creator-scoped bulk reads for the account export. See ListTeesByCreator.
-func (q *Queries) ListHolesByCreator(ctx context.Context, createdBy string) ([]Hole, error) {
-	rows, err := q.db.QueryContext(ctx, listHolesByCreator, createdBy)
+// Uploader-scoped bulk reads for the account export. See ListTeesByUploader.
+func (q *Queries) ListHolesByUploader(ctx context.Context, uploadedBy *string) ([]Hole, error) {
+	rows, err := q.db.QueryContext(ctx, listHolesByUploader, uploadedBy)
 	if err != nil {
 		return nil, err
 	}

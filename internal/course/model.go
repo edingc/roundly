@@ -14,12 +14,13 @@ type Course struct {
 	Latitude     *float64 `json:"latitude"`
 	Longitude    *float64 `json:"longitude"`
 	Pinned       bool     `json:"pinned"`
-	CreatedBy    string   `json:"created_by"`
-	CreatedAt    string   `json:"created_at"`
-	UpdatedAt    string   `json:"updated_at"`
-	// CanEdit tells the frontend whether to show edit controls, so it does not
-	// have to duplicate the ownership rule.
-	CanEdit bool `json:"can_edit"`
+	// UploadedBy records who entered this course, and nothing more. It grants
+	// no rights: a course is shared reference data that anybody signed in may
+	// correct. It is null once that person deletes their account, which is a
+	// normal state and not a broken one.
+	UploadedBy *string `json:"uploaded_by"`
+	CreatedAt  string  `json:"created_at"`
+	UpdatedAt  string  `json:"updated_at"`
 	// HoleCount and TeeCount populate the list cards.
 	HoleCount int `json:"hole_count"`
 	TeeCount  int `json:"tee_count"`
@@ -88,7 +89,7 @@ type Page struct {
 	Offset int      `json:"offset"`
 }
 
-func toCourse(row sqlc.Course, viewerID string) Course {
+func toCourse(row sqlc.Course) Course {
 	return Course{
 		ID:           row.ID,
 		Name:         row.Name,
@@ -100,10 +101,9 @@ func toCourse(row sqlc.Course, viewerID string) Course {
 		Latitude:     row.Latitude,
 		Longitude:    row.Longitude,
 		Pinned:       row.Pinned != 0,
-		CreatedBy:    row.CreatedBy,
+		UploadedBy:   row.UploadedBy,
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,
-		CanEdit:      row.CreatedBy == viewerID,
 	}
 }
 

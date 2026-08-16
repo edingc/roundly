@@ -34,7 +34,7 @@ func (q *Queries) CountSearchCourses(ctx context.Context, query string) (int64, 
 }
 
 const createCourse = `-- name: CreateCourse :exec
-INSERT INTO courses (id, name, address, phone, website, notes, facility_type, latitude, longitude, pinned, created_by, created_at, updated_at)
+INSERT INTO courses (id, name, address, phone, website, notes, facility_type, latitude, longitude, pinned, uploaded_by, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
@@ -49,7 +49,7 @@ type CreateCourseParams struct {
 	Latitude     *float64
 	Longitude    *float64
 	Pinned       int64
-	CreatedBy    string
+	UploadedBy   *string
 	CreatedAt    string
 	UpdatedAt    string
 }
@@ -66,7 +66,7 @@ func (q *Queries) CreateCourse(ctx context.Context, arg CreateCourseParams) erro
 		arg.Latitude,
 		arg.Longitude,
 		arg.Pinned,
-		arg.CreatedBy,
+		arg.UploadedBy,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -83,7 +83,7 @@ func (q *Queries) DeleteCourse(ctx context.Context, id string) error {
 }
 
 const getCourse = `-- name: GetCourse :one
-SELECT id, name, address, created_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses WHERE id = ?
+SELECT id, name, address, uploaded_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses WHERE id = ?
 `
 
 func (q *Queries) GetCourse(ctx context.Context, id string) (Course, error) {
@@ -93,7 +93,7 @@ func (q *Queries) GetCourse(ctx context.Context, id string) (Course, error) {
 		&i.ID,
 		&i.Name,
 		&i.Address,
-		&i.CreatedBy,
+		&i.UploadedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Phone,
@@ -108,7 +108,7 @@ func (q *Queries) GetCourse(ctx context.Context, id string) (Course, error) {
 }
 
 const listCourses = `-- name: ListCourses :many
-SELECT id, name, address, created_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
+SELECT id, name, address, uploaded_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
 ORDER BY name COLLATE NOCASE ASC
 LIMIT ? OFFSET ?
 `
@@ -131,7 +131,7 @@ func (q *Queries) ListCourses(ctx context.Context, arg ListCoursesParams) ([]Cou
 			&i.ID,
 			&i.Name,
 			&i.Address,
-			&i.CreatedBy,
+			&i.UploadedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Phone,
@@ -155,16 +155,16 @@ func (q *Queries) ListCourses(ctx context.Context, arg ListCoursesParams) ([]Cou
 	return items, nil
 }
 
-const listCoursesByCreator = `-- name: ListCoursesByCreator :many
-SELECT id, name, address, created_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
-WHERE created_by = ?
+const listCoursesByUploader = `-- name: ListCoursesByUploader :many
+SELECT id, name, address, uploaded_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
+WHERE uploaded_by = ?
 ORDER BY name COLLATE NOCASE ASC
 `
 
-// Every course this user created, for the account export. Backed by
-// idx_courses_created_by.
-func (q *Queries) ListCoursesByCreator(ctx context.Context, createdBy string) ([]Course, error) {
-	rows, err := q.db.QueryContext(ctx, listCoursesByCreator, createdBy)
+// Every course this user uploaded, for the account export. Backed by
+// idx_courses_uploaded_by.
+func (q *Queries) ListCoursesByUploader(ctx context.Context, uploadedBy *string) ([]Course, error) {
+	rows, err := q.db.QueryContext(ctx, listCoursesByUploader, uploadedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (q *Queries) ListCoursesByCreator(ctx context.Context, createdBy string) ([
 			&i.ID,
 			&i.Name,
 			&i.Address,
-			&i.CreatedBy,
+			&i.UploadedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Phone,
@@ -201,7 +201,7 @@ func (q *Queries) ListCoursesByCreator(ctx context.Context, createdBy string) ([
 }
 
 const searchCourses = `-- name: SearchCourses :many
-SELECT id, name, address, created_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
+SELECT id, name, address, uploaded_by, created_at, updated_at, phone, website, notes, facility_type, latitude, longitude, pinned FROM courses
 WHERE instr(lower(name), ?1) > 0
    OR instr(lower(IFNULL(address, '')), ?1) > 0
 ORDER BY name COLLATE NOCASE ASC
@@ -231,7 +231,7 @@ func (q *Queries) SearchCourses(ctx context.Context, arg SearchCoursesParams) ([
 			&i.ID,
 			&i.Name,
 			&i.Address,
-			&i.CreatedBy,
+			&i.UploadedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Phone,

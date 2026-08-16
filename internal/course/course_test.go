@@ -25,7 +25,7 @@ func newTestService(t *testing.T) (*Service, *database.DB) {
 	return NewService(db), db
 }
 
-// courses.created_by is a foreign key, so tests need real user rows.
+// courses.uploaded_by is a foreign key, so tests need real user rows.
 func createUser(t *testing.T, db *database.DB, email string) string {
 	t.Helper()
 
@@ -97,10 +97,6 @@ func TestCreateCourseGeneratesHolesAndTees(t *testing.T) {
 	if len(detail.Tees) != 2 {
 		t.Fatalf("tees = %d, want 2", len(detail.Tees))
 	}
-	if !detail.CanEdit {
-		t.Error("the creator should be able to edit")
-	}
-
 	// display_order should follow the order supplied.
 	if detail.Tees[0].Name != "Championship" || detail.Tees[1].Name != "Forward" {
 		t.Errorf("tee order = %q, %q; want Championship, Forward", detail.Tees[0].Name, detail.Tees[1].Name)
@@ -229,7 +225,7 @@ func TestSameHoleHasDifferentParPerTee(t *testing.T) {
 		t.Fatalf("set forward tee detail: %v", err)
 	}
 
-	reloaded, err := svc.Get(ctx, owner, detail.ID)
+	reloaded, err := svc.Get(ctx, detail.ID)
 	if err != nil {
 		t.Fatalf("reload course: %v", err)
 	}
@@ -307,7 +303,7 @@ func TestTeeTotalYardageIsDerived(t *testing.T) {
 		}
 	}
 
-	reloaded, err := svc.Get(ctx, owner, detail.ID)
+	reloaded, err := svc.Get(ctx, detail.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -316,14 +312,17 @@ func TestTeeTotalYardageIsDerived(t *testing.T) {
 	}
 }
 
-func TestOnlyCreatorCanModify(t *testing.T) {
+// Nobody owns a course. This test previously asserted the opposite — that only
+// the creator could modify one — and it is inverted rather than deleted so the
+// change in behaviour is visible in the diff.
+func TestAnyoneCanModifyACourse(t *testing.T) {
 	svc, db := newTestService(t)
 	ctx := context.Background()
-	owner := createUser(t, db, "owner@example.com")
+	uploader := createUser(t, db, "uploader@example.com")
 	stranger := createUser(t, db, "stranger@example.com")
 
-	detail, err := svc.Create(ctx, owner, CreateCourseInput{
-		Name: "Owned GC",
+	detail, err := svc.Create(ctx, uploader, CreateCourseInput{
+		Name: "Shared GC",
 		Tees: []TeeInput{{Name: "Only", Color: "#123456"}},
 	})
 	if err != nil {
@@ -331,47 +330,90 @@ func TestOnlyCreatorCanModify(t *testing.T) {
 	}
 	hole, tee := detail.Holes[0], detail.Tees[0]
 
-	// A stranger can still read it: the directory is shared.
-	visible, err := svc.Get(ctx, stranger, detail.ID)
-	if err != nil {
+	if detail.UploadedBy == nil || *detail.UploadedBy != uploader {
+		t.Errorf("uploaded_by = %v, want the creating user", detail.UploadedBy)
+	}
+
+	// A stranger can read it, as they always could.
+	if _, err := svc.Get(ctx, detail.ID); err != nil {
 		t.Fatalf("stranger cannot read the course: %v", err)
 	}
-	if visible.CanEdit {
-		t.Error("can_edit should be false for a non-creator")
+
+	// And can now correct it, which is the point: a wrong yardage should not be
+	// uncorrectable just because someone else typed it in.
+	if _, err := svc.Update(ctx, stranger, detail.ID, UpdateCourseInput{Name: "Corrected GC"}); err != nil {
+		t.Errorf("update course: a stranger was refused: %v", err)
+	}
+	if _, err := svc.AddTee(ctx, stranger, detail.ID, TeeInput{Name: "Back", Color: "#000000"}); err != nil {
+		t.Errorf("add tee: a stranger was refused: %v", err)
+	}
+	if _, err := svc.UpdateTee(ctx, stranger, tee.ID, TeeInput{Name: "Renamed", Color: "#000000"}); err != nil {
+		t.Errorf("update tee: a stranger was refused: %v", err)
+	}
+	if _, err := svc.UpdateHole(ctx, stranger, hole.ID, HoleInput{}); err != nil {
+		t.Errorf("update hole: a stranger was refused: %v", err)
+	}
+	if _, err := svc.SetTeeDetail(ctx, stranger, hole.ID, tee.ID, 4, 400); err != nil {
+		t.Errorf("set tee detail: a stranger was refused: %v", err)
+	}
+	if err := svc.ClearTeeDetail(ctx, stranger, hole.ID, tee.ID); err != nil {
+		t.Errorf("clear tee detail: a stranger was refused: %v", err)
+	}
+	if err := svc.DeleteTee(ctx, stranger, tee.ID); err != nil {
+		t.Errorf("delete tee: a stranger was refused: %v", err)
 	}
 
-	cases := map[string]error{
-		"update course": func() error {
-			_, err := svc.Update(ctx, stranger, detail.ID, UpdateCourseInput{Name: "Hijacked"})
-			return err
-		}(),
-		"delete course": svc.Delete(ctx, stranger, detail.ID),
-		"add tee": func() error {
-			_, err := svc.AddTee(ctx, stranger, detail.ID, TeeInput{Name: "X", Color: "#000000"})
-			return err
-		}(),
-		"update tee": func() error {
-			_, err := svc.UpdateTee(ctx, stranger, tee.ID, TeeInput{Name: "X", Color: "#000000"})
-			return err
-		}(),
-		"delete tee":       svc.DeleteTee(ctx, stranger, tee.ID),
-		"add hole":         func() error { _, err := svc.AddHole(ctx, stranger, detail.ID, HoleInput{HoleNumber: 1}); return err }(),
-		"update hole":      func() error { _, err := svc.UpdateHole(ctx, stranger, hole.ID, HoleInput{}); return err }(),
-		"delete hole":      svc.DeleteHole(ctx, stranger, hole.ID),
-		"set tee detail":   func() error { _, err := svc.SetTeeDetail(ctx, stranger, hole.ID, tee.ID, 4, 400); return err }(),
-		"clear tee detail": svc.ClearTeeDetail(ctx, stranger, hole.ID, tee.ID),
+	// The uploader keeps no special standing either — attribution grants nothing.
+	if _, err := svc.Update(ctx, uploader, detail.ID, UpdateCourseInput{Name: "Shared GC"}); err != nil {
+		t.Errorf("the uploader was refused: %v", err)
+	}
+}
+
+// A course outlives the account that uploaded it: the attribution goes null and
+// the course stays readable and editable. This is what makes account deletion
+// possible at all.
+func TestCourseSurvivesItsUploader(t *testing.T) {
+	svc, db := newTestService(t)
+	ctx := context.Background()
+	uploader := createUser(t, db, "leaving@example.com")
+	other := createUser(t, db, "staying@example.com")
+
+	detail, err := svc.Create(ctx, uploader, CreateCourseInput{
+		Name: "Orphan Links",
+		Tees: []TeeInput{{Name: "Only", Color: "#123456"}},
+	})
+	if err != nil {
+		t.Fatalf("create course: %v", err)
 	}
 
-	for name, err := range cases {
-		if err == nil {
-			t.Errorf("%s: a non-creator was allowed", name)
-			continue
-		}
-		// "add hole" collides on the unique hole number before the ownership
-		// check would matter, so accept either refusal.
-		if status := statusOf(t, err); status != 403 && status != 409 {
-			t.Errorf("%s: status = %d, want 403", name, status)
-		}
+	if _, err := db.Exec("DELETE FROM users WHERE id = ?", uploader); err != nil {
+		t.Fatalf("delete the uploader: %v", err)
+	}
+
+	// The whole list is the risk here, not just this row: uploaded_by is scanned
+	// into a *string, and getting that wrong fails every row in the page.
+	page, err := svc.List(ctx, "", 25, 0)
+	if err != nil {
+		t.Fatalf("list courses after the uploader left: %v", err)
+	}
+	if len(page.Items) != 1 {
+		t.Fatalf("courses = %d, want 1", len(page.Items))
+	}
+	if page.Items[0].UploadedBy != nil {
+		t.Errorf("uploaded_by = %v, want nil once the uploader is gone", page.Items[0].UploadedBy)
+	}
+
+	reloaded, err := svc.Get(ctx, detail.ID)
+	if err != nil {
+		t.Fatalf("get an unattributed course: %v", err)
+	}
+	if len(reloaded.Tees) != 1 || len(reloaded.Holes) != DefaultHoleCount {
+		t.Errorf("tees = %d, holes = %d; the course lost children", len(reloaded.Tees), len(reloaded.Holes))
+	}
+
+	// And it is still editable, rather than frozen forever.
+	if _, err := svc.Update(ctx, other, detail.ID, UpdateCourseInput{Name: "Adopted Links"}); err != nil {
+		t.Errorf("an unattributed course should still be editable: %v", err)
 	}
 }
 
@@ -435,7 +477,7 @@ func TestDeleteTeeCascadesItsHoleDetails(t *testing.T) {
 		t.Fatalf("delete tee: %v", err)
 	}
 
-	reloaded, err := svc.Get(ctx, owner, detail.ID)
+	reloaded, err := svc.Get(ctx, detail.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -468,7 +510,7 @@ func TestDeleteCourseCascades(t *testing.T) {
 		t.Fatalf("delete course: %v", err)
 	}
 
-	if _, err := svc.Get(ctx, owner, detail.ID); err == nil {
+	if _, err := svc.Get(ctx, detail.ID); err == nil {
 		t.Error("the course is still readable after deletion")
 	} else if status := statusOf(t, err); status != 404 {
 		t.Errorf("status = %d, want 404", status)
@@ -519,7 +561,7 @@ func TestSearchMatchesNameAndAddressLiterally(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		page, err := svc.List(ctx, owner, tc.term, 25, 0)
+		page, err := svc.List(ctx, tc.term, 25, 0)
 		if err != nil {
 			t.Fatalf("search %q: %v", tc.term, err)
 		}
@@ -540,7 +582,7 @@ func TestListPaginates(t *testing.T) {
 		}
 	}
 
-	first, err := svc.List(ctx, owner, "", 2, 0)
+	first, err := svc.List(ctx, "", 2, 0)
 	if err != nil {
 		t.Fatalf("list page 1: %v", err)
 	}
@@ -551,7 +593,7 @@ func TestListPaginates(t *testing.T) {
 		t.Errorf("first item = %q, want A GC (sorted by name)", first.Items[0].Name)
 	}
 
-	second, err := svc.List(ctx, owner, "", 2, 2)
+	second, err := svc.List(ctx, "", 2, 2)
 	if err != nil {
 		t.Fatalf("list page 2: %v", err)
 	}
@@ -656,11 +698,10 @@ func TestUpdateHoleRejectsDuplicateHandicapIndex(t *testing.T) {
 }
 
 func TestGetMissingCourseIsNotFound(t *testing.T) {
-	svc, db := newTestService(t)
+	svc, _ := newTestService(t)
 	ctx := context.Background()
-	owner := createUser(t, db, "owner@example.com")
 
-	if _, err := svc.Get(ctx, owner, id.New()); err == nil {
+	if _, err := svc.Get(ctx, id.New()); err == nil {
 		t.Fatal("a missing course was returned")
 	} else if status := statusOf(t, err); status != 404 {
 		t.Errorf("status = %d, want 404", status)
@@ -913,7 +954,7 @@ func TestImportUpdatesExistingCourse(t *testing.T) {
 	}
 
 	// Verify only one course exists.
-	page, err := svc.List(ctx, owner, "", 100, 0)
+	page, err := svc.List(ctx, "", 100, 0)
 	if err != nil {
 		t.Fatalf("list courses: %v", err)
 	}
@@ -922,18 +963,22 @@ func TestImportUpdatesExistingCourse(t *testing.T) {
 	}
 }
 
-// TestImportOtherUsersCourseCreatesNew verifies that importing a file
-// containing another user's course ID creates a new course rather than
-// overwriting theirs.
-func TestImportOtherUsersCourseCreatesNew(t *testing.T) {
+// Importing a file that names an existing course updates that course, whoever
+// uploaded it. This inverts an earlier test which asserted the import forked a
+// copy instead — that fork only existed to avoid touching someone else's
+// property, and courses are nobody's property now.
+//
+// The sharp edge, worth knowing: import is a destructive sync, so a stale file
+// removes tees and holes added since it was exported. That was already true for
+// the uploader; it now applies to everyone, exactly as hand-editing does.
+func TestImportUpdatesAnExistingCourseWhoeverUploadedIt(t *testing.T) {
 	svc, db := newTestService(t)
 	ctx := context.Background()
-	owner := createUser(t, db, "owner@example.com")
+	uploader := createUser(t, db, "uploader@example.com")
 	other := createUser(t, db, "other@example.com")
 
-	// Owner creates a course.
-	original, err := svc.Import(ctx, owner, ImportCourseInput{
-		Name: "Owner's Course",
+	original, err := svc.Import(ctx, uploader, ImportCourseInput{
+		Name: "Shared Course",
 		Tees: []TeeInput{{Name: "Back", Color: "#000000"}},
 		Holes: []ImportHoleInput{
 			{HoleNumber: 1, TeeDetails: []ImportTeeDetailInput{{TeeName: "Back", Par: 4, Yardage: 400}}},
@@ -943,29 +988,38 @@ func TestImportOtherUsersCourseCreatesNew(t *testing.T) {
 		t.Fatalf("create original: %v", err)
 	}
 
-	// Other user imports the same file (with the original's ID).
 	imported, err := svc.Import(ctx, other, ImportCourseInput{
 		ID:   original.ID,
-		Name: "Owner's Course",
+		Name: "Shared Course, corrected",
 		Tees: []TeeInput{{Name: "Back", Color: "#000000"}},
 		Holes: []ImportHoleInput{
-			{HoleNumber: 1, TeeDetails: []ImportTeeDetailInput{{TeeName: "Back", Par: 4, Yardage: 400}}},
+			{HoleNumber: 1, TeeDetails: []ImportTeeDetailInput{{TeeName: "Back", Par: 4, Yardage: 415}}},
 		},
 	})
 	if err != nil {
-		t.Fatalf("import by other user: %v", err)
+		t.Fatalf("import by another user: %v", err)
 	}
 
-	if imported.ID == original.ID {
-		t.Error("other user's import reused the original course ID; expected a new one")
+	if imported.ID != original.ID {
+		t.Errorf("import created a new course %q; want it to update %q", imported.ID, original.ID)
+	}
+	if imported.Name != "Shared Course, corrected" {
+		t.Errorf("name = %q, want the imported correction", imported.Name)
+	}
+	if imported.Holes[0].TeeDetails[0].Yardage != 415 {
+		t.Errorf("yardage = %d, want the corrected 415", imported.Holes[0].TeeDetails[0].Yardage)
 	}
 
-	// Both courses should exist.
-	page, err := svc.List(ctx, owner, "", 100, 0)
+	// Attribution stays with whoever uploaded it first; an edit is not a claim.
+	if imported.UploadedBy == nil || *imported.UploadedBy != uploader {
+		t.Errorf("uploaded_by = %v, want it unchanged at the original uploader", imported.UploadedBy)
+	}
+
+	page, err := svc.List(ctx, "", 100, 0)
 	if err != nil {
 		t.Fatalf("list courses: %v", err)
 	}
-	if page.Total != 2 {
-		t.Errorf("total courses = %d, want 2", page.Total)
+	if page.Total != 1 {
+		t.Errorf("total courses = %d, want 1 (updated, not forked)", page.Total)
 	}
 }

@@ -52,22 +52,22 @@ type Querier interface {
 	ListAPIKeysByUser(ctx context.Context, userID string) ([]ApiKey, error)
 	ListClubsByUser(ctx context.Context, userID string) ([]Club, error)
 	ListCourses(ctx context.Context, arg ListCoursesParams) ([]Course, error)
-	// Every course this user created, for the account export. Backed by
-	// idx_courses_created_by.
-	ListCoursesByCreator(ctx context.Context, createdBy string) ([]Course, error)
+	// Every course this user uploaded, for the account export. Backed by
+	// idx_courses_uploaded_by.
+	ListCoursesByUploader(ctx context.Context, uploadedBy *string) ([]Course, error)
 	ListHoleTeeDetailsByCourse(ctx context.Context, courseID string) ([]HoleTeeDetail, error)
-	ListHoleTeeDetailsByCreator(ctx context.Context, createdBy string) ([]HoleTeeDetail, error)
 	ListHoleTeeDetailsByHole(ctx context.Context, holeID string) ([]HoleTeeDetail, error)
+	ListHoleTeeDetailsByUploader(ctx context.Context, uploadedBy *string) ([]HoleTeeDetail, error)
 	ListHolesByCourse(ctx context.Context, courseID string) ([]Hole, error)
-	// Creator-scoped bulk reads for the account export. See ListTeesByCreator.
-	ListHolesByCreator(ctx context.Context, createdBy string) ([]Hole, error)
+	// Uploader-scoped bulk reads for the account export. See ListTeesByUploader.
+	ListHolesByUploader(ctx context.Context, uploadedBy *string) ([]Hole, error)
 	ListOAuthAccountsByUser(ctx context.Context, userID string) ([]OauthAccount, error)
 	ListTeesByCourse(ctx context.Context, courseID string) ([]Tee, error)
-	// Creator-scoped bulk read for the account export. Reading per course instead
+	// Uploader-scoped bulk read for the account export. Reading per course instead
 	// would cost three queries each, which on a single-connection pool turns a
 	// sixty-course export into a hundred and eighty sequential round trips.
 	// Ordering by course_id first lets the caller group in one pass.
-	ListTeesByCreator(ctx context.Context, createdBy string) ([]Tee, error)
+	ListTeesByUploader(ctx context.Context, uploadedBy *string) ([]Tee, error)
 	MaxClubDisplayOrder(ctx context.Context, userID string) (int64, error)
 	MaxTeeDisplayOrder(ctx context.Context, courseID string) (int64, error)
 	// The user_id predicate is the ownership check: another user's key id matches

@@ -19,7 +19,6 @@ import {
   PlusIcon,
   Spinner,
   TrashIcon,
-  cx,
 } from '../components/ui'
 
 /**
@@ -228,7 +227,6 @@ export default function CourseDetailPage() {
     )
   }
 
-  const editable = course.can_edit
 
   return (
     <div className="space-y-6">
@@ -426,11 +424,6 @@ export default function CourseDetailPage() {
                 {course.notes}
               </p>
             )}
-            {!editable && (
-              <p className="mt-2 inline-block rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                Added by someone else — read only
-              </p>
-            )}
           </div>
           <div className="ml-auto flex gap-2">
             <button
@@ -448,16 +441,14 @@ export default function CourseDetailPage() {
                 </>
               )}
             </button>
-            {editable && (
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => setEditingDetails(true)}
-              >
-                <PencilIcon className="size-4" />
-                Edit details
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setEditingDetails(true)}
+            >
+              <PencilIcon className="size-4" />
+              Edit details
+            </button>
           </div>
         </div>
       )}
@@ -476,16 +467,14 @@ export default function CourseDetailPage() {
       <section className="space-y-3">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold">Tees</h2>
-          {editable && (
-            <button
-              type="button"
-              className="btn-secondary ml-auto !min-h-0 !px-3 !py-1.5"
-              onClick={() => setTeeDialog({ mode: 'add' })}
-            >
-              <PlusIcon className="size-4" />
-              Add tee
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn-secondary ml-auto !min-h-0 !px-3 !py-1.5"
+            onClick={() => setTeeDialog({ mode: 'add' })}
+          >
+            <PlusIcon className="size-4" />
+            Add tee
+          </button>
         </div>
 
         {course.tees.length === 0 ? (
@@ -499,7 +488,7 @@ export default function CourseDetailPage() {
               return (
                 <li
                   key={tee.id}
-                  className={cx('card flex items-center gap-3 px-3 py-2', editable && 'pr-2')}
+                  className={'card flex items-center gap-3 px-3 py-2 pr-2'}
                 >
                   <span
                     aria-hidden="true"
@@ -515,26 +504,24 @@ export default function CourseDetailPage() {
                       {ratings !== '' && ` · ${ratings}`}
                     </p>
                   </div>
-                  {editable && (
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        className="btn-ghost !min-h-0 !px-2 !py-1 text-xs"
-                        onClick={() => setTeeDialog({ mode: 'edit', tee })}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-ghost !min-h-0 !px-2 !py-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950"
-                        onClick={() => setConfirmDeleteTee(tee)}
-                        aria-label={`Delete the ${tee.name} tee`}
-                        title={`Delete the ${tee.name} tee`}
-                      >
-                        <TrashIcon className="size-4" />
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="btn-ghost !min-h-0 !px-2 !py-1 text-xs"
+                      onClick={() => setTeeDialog({ mode: 'edit', tee })}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost !min-h-0 !px-2 !py-1 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950"
+                      onClick={() => setConfirmDeleteTee(tee)}
+                      aria-label={`Delete the ${tee.name} tee`}
+                      title={`Delete the ${tee.name} tee`}
+                    >
+                      <TrashIcon className="size-4" />
+                    </button>
+                  </div>
                 </li>
               )
             })}
@@ -545,47 +532,45 @@ export default function CourseDetailPage() {
       {/* Par / yardage grid */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Scorecard</h2>
-        <ScorecardGrid course={course} editable={editable} onCourseChanged={() => void load()} />
+        <ScorecardGrid course={course} editable onCourseChanged={() => void load()} />
       </section>
 
-      {editable && (
-        <section className="border-t border-slate-200 pt-6 dark:border-slate-800">
-          {confirmDelete ? (
-            <div className="card space-y-3 border-red-300 p-5 dark:border-red-900">
-              <p className="text-sm font-medium">
-                Delete “{course.name}”? This also removes its tees, holes, and every par and
-                yardage you have entered.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => setConfirmDelete(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn-danger"
-                  disabled={deleting}
-                  onClick={() => void handleDeleteCourse()}
-                >
-                  {deleting ? <Spinner label="Deleting" /> : 'Delete course'}
-                </button>
-              </div>
+      <section className="border-t border-slate-200 pt-6 dark:border-slate-800">
+        {confirmDelete ? (
+          <div className="card space-y-3 border-red-300 p-5 dark:border-red-900">
+            <p className="text-sm font-medium">
+              Delete “{course.name}”? This also removes its tees, holes, and every par and
+              yardage you have entered.
+            </p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setConfirmDelete(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-danger"
+                disabled={deleting}
+                onClick={() => void handleDeleteCourse()}
+              >
+                {deleting ? <Spinner label="Deleting" /> : 'Delete course'}
+              </button>
             </div>
-          ) : (
-            <button
-              type="button"
-              className="btn-ghost text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
-              onClick={() => setConfirmDelete(true)}
-            >
-              <TrashIcon className="size-4" />
-              Delete course
-            </button>
-          )}
-        </section>
-      )}
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="btn-ghost text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+            onClick={() => setConfirmDelete(true)}
+          >
+            <TrashIcon className="size-4" />
+            Delete course
+          </button>
+        )}
+      </section>
 
       {teeDialog && (
         <TeeDialog

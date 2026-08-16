@@ -185,19 +185,19 @@ func (q *Queries) ListTeesByCourse(ctx context.Context, courseID string) ([]Tee,
 	return items, nil
 }
 
-const listTeesByCreator = `-- name: ListTeesByCreator :many
+const listTeesByUploader = `-- name: ListTeesByUploader :many
 SELECT t.id, t.course_id, t.name, t.color, t.course_rating_men, t.slope_rating_men, t.total_yardage, t.display_order, t.course_rating_women, t.slope_rating_women, t.front9_course_rating_men, t.front9_slope_rating_men, t.back9_course_rating_men, t.back9_slope_rating_men, t.front9_course_rating_women, t.front9_slope_rating_women, t.back9_course_rating_women, t.back9_slope_rating_women FROM tees t
 JOIN courses c ON c.id = t.course_id
-WHERE c.created_by = ?
+WHERE c.uploaded_by = ?
 ORDER BY t.course_id ASC, t.display_order ASC, t.name COLLATE NOCASE ASC
 `
 
-// Creator-scoped bulk read for the account export. Reading per course instead
+// Uploader-scoped bulk read for the account export. Reading per course instead
 // would cost three queries each, which on a single-connection pool turns a
 // sixty-course export into a hundred and eighty sequential round trips.
 // Ordering by course_id first lets the caller group in one pass.
-func (q *Queries) ListTeesByCreator(ctx context.Context, createdBy string) ([]Tee, error) {
-	rows, err := q.db.QueryContext(ctx, listTeesByCreator, createdBy)
+func (q *Queries) ListTeesByUploader(ctx context.Context, uploadedBy *string) ([]Tee, error) {
+	rows, err := q.db.QueryContext(ctx, listTeesByUploader, uploadedBy)
 	if err != nil {
 		return nil, err
 	}

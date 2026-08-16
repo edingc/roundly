@@ -103,10 +103,13 @@ export interface CourseSummary {
   latitude: number | null
   longitude: number | null
   pinned: boolean
-  created_by: string
+  /**
+   * Who entered this course. Attribution only — it grants no rights, and it is
+   * null once that account is deleted. Anyone signed in may edit any course.
+   */
+  uploaded_by: string | null
   created_at: string
   updated_at: string
-  can_edit: boolean
   hole_count: number
   tee_count: number
 }
