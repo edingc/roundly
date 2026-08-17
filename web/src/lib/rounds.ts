@@ -22,9 +22,34 @@ export function formatTally(t: Tally): string {
   return `${t.made}/${t.attempted} (${Math.round((t.made / t.attempted) * 100)}%)`
 }
 
+/**
+ * A tally as a whole percentage, or null when nothing was attempted.
+ *
+ * Null rather than zero throughout: a chart leaves a gap rather than drawing a
+ * drop that never happened, and a meter draws no bar rather than an empty one.
+ */
+export function tallyRate(t: Tally): number | null {
+  if (t.attempted === 0) return null
+  return Math.round((t.made / t.attempted) * 100)
+}
+
 export function formatPercent(t: Tally): string {
-  if (t.attempted === 0) return '—'
-  return `${Math.round((t.made / t.attempted) * 100)}%`
+  const rate = tallyRate(t)
+  return rate === null ? '—' : `${rate}%`
+}
+
+/**
+ * Whether a round came in under the bogey golfer's benchmark - a stroke over
+ * par on every hole.
+ *
+ * This is the one threshold the round list colours against, and the benchmark
+ * is the handicap system's rather than a number invented here. Measured over
+ * the holes actually completed, so a card with five holes on it is judged
+ * against five holes. Level bogey golf counts as not beating it.
+ */
+export function beatsBogeyGolf(round: Round): boolean {
+  const holes = round.summary.holes_completed
+  return holes > 0 && round.summary.to_par < holes
 }
 
 /** Average putts per completed hole, to one decimal. */

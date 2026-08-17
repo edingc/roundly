@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ApiError, api } from '../lib/api'
-import { formatPlayedOn, formatToPar } from '../lib/rounds'
+import { formatPercent, formatPlayedOn, formatToPar, tallyRate } from '../lib/rounds'
 import type { Overview, Tally } from '../types'
 import { BarCompare, ChartCard, SERIES_COLORS } from '../components/charts'
 import { Alert, EmptyState, PageSpinner, PlusIcon } from '../components/ui'
@@ -22,18 +22,6 @@ const WINDOWS = [
   { value: 50, label: 'Last 50' },
   { value: 0, label: 'All time' },
 ]
-
-/** A tally as a percentage, or null when nothing was attempted - null so a
- *  chart leaves a gap rather than drawing a drop to zero that never happened. */
-function rate(t: Tally): number | null {
-  if (t.attempted === 0) return null
-  return Math.round((t.made / t.attempted) * 100)
-}
-
-function pct(t: Tally): string {
-  if (t.attempted === 0) return '—'
-  return `${Math.round((t.made / t.attempted) * 100)}%`
-}
 
 function oneDecimal(v: number | null): string {
   return v === null ? '—' : v.toFixed(1)
@@ -90,8 +78,8 @@ export default function OverviewPage() {
     toPar: p.to_par,
     strokes: p.strokes,
     putts: p.putts,
-    gir: rate(p.greens_in_regulation),
-    fir: rate(p.fairways),
+    gir: tallyRate(p.greens_in_regulation),
+    fir: tallyRate(p.fairways),
     differential: p.differential,
     eagles: p.scores.eagle_or_better,
     birdies: p.scores.birdies,
@@ -160,11 +148,27 @@ export default function OverviewPage() {
       </section>
 
       <section className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatTile label="Greens in reg" value={pct(overview.greens_in_regulation)} tally={overview.greens_in_regulation} />
-        <StatTile label="Fairways" value={pct(overview.fairways)} tally={overview.fairways} />
+        <StatTile
+          label="Greens in reg"
+          value={formatPercent(overview.greens_in_regulation)}
+          tally={overview.greens_in_regulation}
+        />
+        <StatTile
+          label="Fairways"
+          value={formatPercent(overview.fairways)}
+          tally={overview.fairways}
+        />
         <StatTile label="Putts / round" value={oneDecimal(overview.average_putts)} />
-        <StatTile label="Scrambling" value={pct(overview.scrambles)} tally={overview.scrambles} />
-        <StatTile label="Sand saves" value={pct(overview.sand_saves)} tally={overview.sand_saves} />
+        <StatTile
+          label="Scrambling"
+          value={formatPercent(overview.scrambles)}
+          tally={overview.scrambles}
+        />
+        <StatTile
+          label="Sand saves"
+          value={formatPercent(overview.sand_saves)}
+          tally={overview.sand_saves}
+        />
         <StatTile label="Penalties / round" value={oneDecimal(overview.average_penalties)} />
       </section>
 
