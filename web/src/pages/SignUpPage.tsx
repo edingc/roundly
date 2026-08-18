@@ -52,7 +52,7 @@ export default function SignUpPage() {
           Already have an account?{' '}
           <Link
             to="/login"
-            className="font-semibold text-brand-700 hover:underline dark:text-brand-300"
+            className="font-semibold text-accent-700 hover:underline dark:text-accent-300"
           >
             Sign in
           </Link>

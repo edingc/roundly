@@ -241,7 +241,7 @@ export function TeeFields({
               key={preset.color}
               type="button"
               onClick={() => onChange({ ...values, color: preset.color, name: values.name || preset.name })}
-              className="flex items-center gap-1.5 rounded-full border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <span
                 aria-hidden="true"

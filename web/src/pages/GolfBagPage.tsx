@@ -335,10 +335,10 @@ export default function GolfBagPage() {
                 In the bag
                 <span
                   className={cx(
-                    'rounded-full px-2 py-0.5 text-xs font-medium tabular-nums',
+                    'rounded-md px-2 py-0.5 text-xs font-medium tabular-nums',
                     bag?.over_limit
                       ? 'bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100'
-                      : 'bg-brand-100 text-brand-800 dark:bg-brand-900 dark:text-brand-100',
+                      : 'bg-accent-100 text-accent-800 dark:bg-accent-900 dark:text-accent-100',
                   )}
                 >
                   {bag?.active_count} / {bag?.club_limit}
@@ -389,7 +389,7 @@ export default function GolfBagPage() {
               >
                 <ArchiveIcon className="size-4 text-slate-400" />
                 <span className="font-semibold">Retired</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 tabular-nums dark:bg-slate-800 dark:text-slate-300">
+                <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600 tabular-nums dark:bg-slate-800 dark:text-slate-300">
                   {retired.length}
                 </span>
                 <ChevronDownIcon

@@ -180,22 +180,23 @@ export default function CourseListPage() {
             <li key={course.id}>
               <Link
                 to={`/courses/${course.id}`}
-                className="card flex h-full flex-col p-4 transition-colors hover:border-brand-400 hover:bg-brand-50/50 dark:hover:border-brand-400 dark:hover:bg-brand-950/30"
+                className="card flex h-full flex-col p-4 transition-colors hover:border-accent-400 hover:bg-accent-50/50 dark:hover:border-accent-400 dark:hover:bg-accent-950/30"
               >
                 <div className="flex items-start gap-2">
                   <h2 className="font-semibold">{course.name}</h2>
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
-                    {/* Sky, not the brand green: green already means "pinned"
-                        on this very card, and amber is spoken for elsewhere as
-                        the caution color. */}
+                    {/* Home is where you play, so it wears the accent. Pinned is
+                        a tag you applied rather than a state of the course, and
+                        it wore green until green was needed for scoring - the
+                        pin icon carries it. */}
                     {course.id === user?.home_course_id && (
-                      <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800 dark:bg-sky-900 dark:text-sky-100">
+                      <span className="flex items-center gap-1 rounded-md bg-accent-100 px-2 py-0.5 text-xs font-medium text-accent-800 dark:bg-accent-900 dark:text-accent-100">
                         <HomeIcon className="size-3" />
                         Home
                       </span>
                     )}
                     {course.pinned && (
-                      <span className="flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-800 dark:bg-brand-900 dark:text-brand-100">
+                      <span className="flex items-center gap-1 rounded-md bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
                         <PinIcon className="size-3" />
                         Pinned
                       </span>

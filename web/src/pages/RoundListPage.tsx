@@ -162,9 +162,9 @@ function Stat({
       {meter !== null && (
         // The track is a light step of the same green rather than grey, so the
         // bar reads as one object at a height too small to carry a border.
-        <dd className="mt-1 h-1 rounded-full bg-brand-100 dark:bg-brand-900">
+        <dd className="mt-1 h-1 rounded-full bg-accent-100 dark:bg-accent-900">
           <div
-            className="h-full rounded-full bg-brand-600 dark:bg-brand-400"
+            className="h-full rounded-full bg-accent-600 dark:bg-accent-400"
             style={{ width: `${meter}%` }}
           />
         </dd>
@@ -187,12 +187,12 @@ function RoundRow({ round, onDelete }: { round: Round; onDelete: () => void }) {
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold">{round.course_name}</span>
               {inProgress && (
-                <span className="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800 dark:bg-sky-900 dark:text-sky-100">
+                <span className="rounded-md bg-accent-100 px-2 py-0.5 text-xs font-medium text-accent-800 dark:bg-accent-900 dark:text-accent-100">
                   In progress
                 </span>
               )}
               {round.status === 'abandoned' && (
-                <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200">
                   Abandoned
                 </span>
               )}

@@ -166,7 +166,7 @@ export default function LoginPage() {
             <label className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-400">
               <input
                 type="checkbox"
-                className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600"
+                className="mt-0.5 size-4 rounded border-slate-300 text-brand-600 focus:ring-accent-500 dark:border-slate-600"
                 checked={rememberDevice}
                 onChange={(e) => setRememberDevice(e.target.checked)}
               />
@@ -184,7 +184,7 @@ export default function LoginPage() {
         <button
           type="button"
           onClick={toggleRecovery}
-          className="mt-4 w-full text-sm font-semibold text-brand-700 hover:underline dark:text-brand-300"
+          className="mt-4 w-full text-sm font-semibold text-accent-700 hover:underline dark:text-accent-300"
         >
           {usingRecoveryCode ? 'Use the emailed code instead' : "Can't access your email?"}
         </button>
@@ -207,7 +207,7 @@ export default function LoginPage() {
           Don&apos;t have an account?{' '}
           <Link
             to="/signup"
-            className="font-semibold text-brand-700 hover:underline dark:text-brand-300"
+            className="font-semibold text-accent-700 hover:underline dark:text-accent-300"
           >
             Sign up
           </Link>

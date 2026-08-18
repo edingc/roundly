@@ -20,11 +20,14 @@ function ThemeToggle() {
 
 /** The signed-in chrome: header, nav, and the routed page body. */
 export function AppLayout() {
+  // The accent rather than the brand green: where you are is not something you
+  // did well, and the green in the header belongs to the mark and to whatever
+  // primary action the page is offering.
   const navLinkClass = ({ isActive }: { isActive: boolean }) =>
     cx(
       'rounded-lg px-3 py-2 text-sm font-medium transition-colors',
       isActive
-        ? 'bg-brand-100 text-brand-800 dark:bg-brand-900 dark:text-brand-100'
+        ? 'bg-accent-100 text-accent-800 dark:bg-accent-900 dark:text-accent-100'
         : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100',
     )
 

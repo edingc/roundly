@@ -343,7 +343,7 @@ export function TeeChip({
   return (
     <span
       className={cx(
-        'inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1',
+        'inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1',
         'text-xs font-medium text-slate-700',
         'dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200',
         className,

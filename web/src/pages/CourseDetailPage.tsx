@@ -337,7 +337,7 @@ export default function CourseDetailPage() {
               type="checkbox"
               checked={pinned}
               onChange={(e) => setPinned(e.target.checked)}
-              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600 dark:bg-slate-800"
+              className="rounded border-slate-300 text-brand-600 focus:ring-accent-500 dark:border-slate-600 dark:bg-slate-800"
             />
             Pin this course
           </label>
@@ -374,7 +374,7 @@ export default function CourseDetailPage() {
                   href={mapsSearchUrl(course)}
                   target="_blank"
                   rel="noreferrer"
-                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-300"
+                  className="hover:text-accent-700 hover:underline dark:hover:text-accent-300"
                 >
                   {courseAddress}
                 </a>
@@ -384,7 +384,7 @@ export default function CourseDetailPage() {
               <p className="mt-0.5 text-sm text-slate-600 dark:text-slate-400">
                 <a
                   href={phoneHref(course.phone)}
-                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-300"
+                  className="hover:text-accent-700 hover:underline dark:hover:text-accent-300"
                 >
                   {formatPhone(course.phone)}
                 </a>
@@ -396,7 +396,7 @@ export default function CourseDetailPage() {
                   href={course.website}
                   target="_blank"
                   rel="noreferrer"
-                  className="hover:text-brand-700 hover:underline dark:hover:text-brand-300"
+                  className="hover:text-accent-700 hover:underline dark:hover:text-accent-300"
                 >
                   {course.website.replace(/^https?:\/\//, '')}
                 </a>
@@ -405,12 +405,12 @@ export default function CourseDetailPage() {
             {(course.facility_type || course.hole_count > 0) && (
               <p className="mt-1.5 flex flex-wrap gap-1.5">
                 {course.facility_type && (
-                  <span className="inline-block rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800 capitalize dark:bg-brand-900 dark:text-brand-100">
+                  <span className="inline-block rounded-md border border-slate-300 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-700 capitalize dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
                     {course.facility_type}
                   </span>
                 )}
                 {course.hole_count > 0 && (
-                  <span className="inline-block rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-medium text-brand-800 dark:bg-brand-900 dark:text-brand-100">
+                  <span className="inline-block rounded-md border border-slate-300 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200">
                     {course.hole_count} holes
                   </span>
                 )}

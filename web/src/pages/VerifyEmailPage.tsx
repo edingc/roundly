@@ -75,7 +75,7 @@ export default function VerifyEmailPage() {
         title="Email confirmed"
         subtitle="Your address is confirmed and your account is ready."
         footer={
-          <Link to="/courses" className="font-semibold text-brand-700 hover:underline dark:text-brand-300">
+          <Link to="/courses" className="font-semibold text-accent-700 hover:underline dark:text-accent-300">
             Go to Roundly
           </Link>
         }
@@ -94,7 +94,7 @@ export default function VerifyEmailPage() {
       title="That link did not work"
       subtitle="Confirmation links are single-use and expire after a day."
       footer={
-        <Link to="/login" className="font-semibold text-brand-700 hover:underline dark:text-brand-300">
+        <Link to="/login" className="font-semibold text-accent-700 hover:underline dark:text-accent-300">
           Back to sign in
         </Link>
       }

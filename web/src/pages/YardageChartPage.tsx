@@ -288,7 +288,7 @@ export default function YardageChartPage() {
               type="checkbox"
               checked={includeBenched}
               onChange={(e) => setIncludeBenched(e.target.checked)}
-              className="size-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600"
+              className="size-4 rounded border-slate-300 text-brand-600 focus:ring-accent-500 dark:border-slate-600"
             />
             Include clubs not in the bag
           </label>

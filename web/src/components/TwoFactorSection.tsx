@@ -242,7 +242,7 @@ export function TwoFactorSection() {
                     <p className="truncate text-sm font-medium">
                       {device.label ?? 'Unknown browser'}
                       {device.current && (
-                        <span className="ml-2 rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800 dark:bg-sky-900 dark:text-sky-100">
+                        <span className="ml-2 rounded-md bg-accent-100 px-2 py-0.5 text-xs font-medium text-accent-800 dark:bg-accent-900 dark:text-accent-100">
                           This browser
                         </span>
                       )}

@@ -145,7 +145,7 @@ export default function AddCoursePage() {
             <li key={s} className="flex items-center gap-2">
               <span
                 className={cx(
-                  'flex items-center gap-2 rounded-full px-3 py-1',
+                  'flex items-center gap-2 rounded-md px-3 py-1',
                   step === s
                     ? 'bg-brand-600 font-semibold text-white'
                     : step > s
@@ -242,7 +242,7 @@ export default function AddCoursePage() {
               type="checkbox"
               checked={pinned}
               onChange={(e) => setPinned(e.target.checked)}
-              className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 dark:border-slate-600 dark:bg-slate-800"
+              className="rounded border-slate-300 text-brand-600 focus:ring-accent-500 dark:border-slate-600 dark:bg-slate-800"
             />
             Pin this course
           </label>

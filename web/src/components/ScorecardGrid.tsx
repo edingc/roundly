@@ -243,7 +243,7 @@ export function ScorecardGrid({
   // tint for save status instead of a border color, so the grid lines stay
   // uniform.
   const cellInputClass =
-    'block w-full bg-transparent px-1 py-2 text-center text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500/60 disabled:cursor-not-allowed disabled:opacity-60'
+    'block w-full bg-transparent px-1 py-2 text-center text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent-500/60 disabled:cursor-not-allowed disabled:opacity-60'
 
   const gridLine = 'border border-slate-200 dark:border-slate-800'
   // A heavier rule between one tee's columns and the next, echoing the ruled

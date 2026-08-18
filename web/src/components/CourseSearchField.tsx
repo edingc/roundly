@@ -173,7 +173,7 @@ export function CourseSearchField({
       </label>
 
       {value && (
-        <div className="mb-2 flex items-center gap-3 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 dark:border-brand-900 dark:bg-brand-950/50">
+        <div className="mb-2 flex items-center gap-3 rounded-lg border border-accent-200 bg-accent-50 px-3 py-2 dark:border-accent-900 dark:bg-accent-950/50">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{value.name}</p>
             {value.location && (
@@ -258,7 +258,7 @@ export function CourseSearchField({
                     onClick={() => select(course)}
                     className={cx(
                       'cursor-pointer px-3 py-2',
-                      index === activeIndex && 'bg-brand-50 dark:bg-brand-950/60',
+                      index === activeIndex && 'bg-accent-50 dark:bg-accent-950/60',
                     )}
                   >
                     <span className="block truncate text-sm font-medium">{course.name}</span>

@@ -199,7 +199,7 @@ export function LocationFields({
             href="https://www.openstreetmap.org/copyright"
             target="_blank"
             rel="noreferrer"
-            className="underline hover:text-brand-700 dark:hover:text-brand-300"
+            className="underline hover:text-accent-700 dark:hover:text-accent-300"
           >
             OpenStreetMap
           </a>{' '}
