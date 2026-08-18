@@ -463,14 +463,42 @@ export function PlusIcon({ className }: { className?: string }) {
   )
 }
 
+/**
+ * A waste can, for destroying a saved record.
+ *
+ * Drawn with a handle and two tines rather than as a tapered bucket: at 16px
+ * the outline alone reads as a cup, and this glyph has to say "gone for good"
+ * at a glance. For taking a row out of a form that is still being edited, see
+ * XIcon - nothing is destroyed there and a can overstates it.
+ */
 export function TrashIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <path
         strokeLinecap="round"
         strokeLinejoin="round"
-        d="M3 6h18M8 6V4h8v2m-9 0l1 14h8l1-14"
+        d="M4 7h16M9.5 7V5.5A1.5 1.5 0 0111 4h2a1.5 1.5 0 011.5 1.5V7M6.5 7l.8 12.1A2 2 0 009.3 21h5.4a2 2 0 002-1.9L17.5 7M10.5 11v6M13.5 11v6"
       />
+    </svg>
+  )
+}
+
+/** Removing a row from a list being edited, and closing things. */
+export function XIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+      <path strokeLinecap="round" d="M6.5 6.5l11 11M17.5 6.5l-11 11" />
+    </svg>
+  )
+}
+
+/** The "more" affordance on a row. Filled dots: an outlined dot is mud at 16px. */
+export function EllipsisIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="19" cy="12" r="1.6" />
     </svg>
   )
 }

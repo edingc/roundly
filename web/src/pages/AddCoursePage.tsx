@@ -22,7 +22,7 @@ import {
   PlusIcon,
   Spinner,
   TeeChip,
-  TrashIcon,
+  XIcon,
   cx,
 } from '../components/ui'
 
@@ -293,7 +293,7 @@ export default function AddCoursePage() {
                     className="btn-ghost ml-auto !min-h-0 !px-2 !py-1 text-red-600 dark:text-red-400"
                     aria-label={`Remove tee ${index + 1}`}
                   >
-                    <TrashIcon className="size-4" />
+                    <XIcon className="size-4" />
                   </button>
                 )}
               </div>

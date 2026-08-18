@@ -18,6 +18,7 @@ import {
   tallyRate,
 } from '../lib/rounds'
 import type { Round } from '../types'
+import { RowMenu, RowMenuItem } from '../components/RowMenu'
 import {
   Alert,
   ConfirmDialog,
@@ -275,14 +276,12 @@ function RoundRow({ round, onDelete }: { round: Round; onDelete: () => void }) {
         )}
       </Link>
 
-      <button
-        type="button"
-        onClick={onDelete}
-        aria-label={`Delete the round at ${round.course_name}`}
-        className="btn-ghost !min-h-0 shrink-0 !px-2 !py-1"
-      >
-        <TrashIcon className="size-4" />
-      </button>
+      <RowMenu label={`Actions for the round at ${round.course_name}`}>
+        <RowMenuItem tone="danger" onClick={onDelete}>
+          <TrashIcon className="size-4" />
+          Delete round
+        </RowMenuItem>
+      </RowMenu>
     </li>
   )
 }

@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ApiError, api, setStoredDeviceToken } from '../lib/api'
 import { useAuth } from '../lib/auth'
 import type { TrustedDevice } from '../types'
-import { Alert, Field, Spinner, TrashIcon } from './ui'
+import { Alert, Field, Spinner, XIcon } from './ui'
 import { RecoveryCodesPanel, RecoveryCodesStatus } from './RecoveryCodes'
 
 /** Renders an ISO timestamp as a plain date, or a dash when there isn't one. */
@@ -257,7 +257,7 @@ export function TwoFactorSection() {
                     aria-label={`Forget ${device.label ?? 'this browser'}`}
                     onClick={() => void handleForget(device)}
                   >
-                    <TrashIcon className="size-4" />
+                    <XIcon className="size-4" />
                   </button>
                 </li>
               ))}
