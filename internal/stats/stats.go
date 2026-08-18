@@ -96,9 +96,13 @@ type Overview struct {
 }
 
 // Handicap is the pair of numbers computed from score differentials.
+//
+// Both read the last twenty rated rounds whatever window the overview is
+// showing, because an index is defined over that record rather than over the
+// span somebody happens to be looking at. See differentialRecord.
 type Handicap struct {
 	// Index is the World Handicap System calculation: the average of the best
-	// differentials of the most recent twenty rounds, by the table in
+	// differentials of the most recent twenty rated rounds, by the table in
 	// handicapUsing. Nil until there are three rounds with a rating to compute
 	// from.
 	Index *float64 `json:"index"`
@@ -107,7 +111,8 @@ type Handicap struct {
 	// does, and the gap between them is the honest measure of consistency.
 	AntiCap *float64 `json:"anti_cap"`
 
-	// DifferentialsAvailable is how many rounds carried a rating and slope.
+	// DifferentialsAvailable is how many differentials the record found, at most
+	// twenty.
 	DifferentialsAvailable int `json:"differentials_available"`
 	// IndexUsing and AntiCapUsing are how many differentials each figure
 	// averaged, so the screen can say "best 3 of 9" rather than implying twenty.
@@ -146,16 +151,18 @@ func (s *Service) Overview(ctx context.Context, userID string, window int) (*Ove
 	}
 
 	// ListAllRounds is newest first. The window takes from the front, and the
-	// series is then reversed so a chart reads left to right.
-	if window > 0 && len(counted) > window {
-		counted = counted[:window]
+	// series is then reversed so a chart reads left to right. `counted` keeps
+	// every finished round, because the handicap below deliberately ignores the
+	// window.
+	windowed := counted
+	if window > 0 && len(windowed) > window {
+		windowed = windowed[:window]
 	}
 
 	out := &Overview{Window: window, Series: []Point{}}
 	var totalStrokes, totalToPar, totalPutts, totalPenalties, scoringRounds int
-	var differentials []float64
 
-	for _, r := range counted {
+	for _, r := range windowed {
 		summary := round.Summarize(holesByRound[r.ID])
 		if summary.HolesCompleted == 0 {
 			continue
@@ -185,9 +192,6 @@ func (s *Service) Overview(ctx context.Context, userID string, window int) (*Ove
 
 		// The round owns this calculation; aggregation only reads it.
 		diff := round.DifferentialFor(r.CourseRating, int64PtrToIntPtr(r.SlopeRating), summary, int(r.HolesIntended))
-		if diff != nil {
-			differentials = append(differentials, *diff)
-		}
 
 		out.Series = append(out.Series, Point{
 			RoundID:      r.ID,
@@ -217,20 +221,50 @@ func (s *Service) Overview(ctx context.Context, userID string, window int) (*Ove
 		out.AveragePutts = ptr(float64(totalPutts) / float64(out.RoundsCounted))
 		out.AveragePenalties = ptr(float64(totalPenalties) / float64(out.RoundsCounted))
 	}
-	out.Handicap = handicapFrom(differentials)
+	out.Handicap = handicapFrom(differentialRecord(counted, holesByRound))
 	return out, nil
 }
 
+// differentialRecord is the scoring record a handicap is computed from: the
+// differentials of the most recent handicapRecordSize rounds that produced one,
+// newest first.
+//
+// Two things it deliberately does not do. It does not look at the window, since
+// an index is defined over the last twenty rated rounds and is not a figure the
+// screen's "last 5" selector has an opinion about - the selector changes every
+// other number on the overview and leaves this one alone. And it does not stop
+// at the twentieth round *played*: a rated round is what feeds a handicap, so a
+// season on unrated courses pushes the record further back rather than shrinking
+// it. Rounds with no rating, or with holes left blank, produce no differential
+// and are passed over.
+func differentialRecord(counted []sqlc.Round, holesByRound map[string][]round.Hole) []float64 {
+	differentials := make([]float64, 0, handicapRecordSize)
+	for _, r := range counted {
+		if len(differentials) == handicapRecordSize {
+			break
+		}
+		summary := round.Summarize(holesByRound[r.ID])
+		diff := round.DifferentialFor(r.CourseRating, int64PtrToIntPtr(r.SlopeRating), summary, int(r.HolesIntended))
+		if diff != nil {
+			differentials = append(differentials, *diff)
+		}
+	}
+	return differentials
+}
+
+// handicapRecordSize is how many rounds a handicap reads, which is what the
+// World Handicap System looks at.
+const handicapRecordSize = 20
+
 // handicapFrom turns a set of differentials into an index and its mirror.
 //
-// Newest first on the way in; only the most recent twenty are considered, which
-// is what the World Handicap System looks at.
+// Newest first on the way in; only the most recent twenty are considered.
 func handicapFrom(differentials []float64) *Handicap {
 	if len(differentials) == 0 {
 		return nil
 	}
-	if len(differentials) > 20 {
-		differentials = differentials[:20]
+	if len(differentials) > handicapRecordSize {
+		differentials = differentials[:handicapRecordSize]
 	}
 
 	h := &Handicap{DifferentialsAvailable: len(differentials), Unofficial: true}

@@ -22,8 +22,17 @@ fairway you hit on a hole you picked up is still a fairway you hit.
 
 **The window changes the question, not the presentation.** "Last 5" and "all
 time" are different figures. The server takes the window rather than sending
-everything and letting the client slice, so the handicap is computed against the
-same twenty rounds the World Handicap System would look at.
+everything and letting the client slice.
+
+**The handicap is the one figure the window does not touch.** An index is defined
+over the last twenty rated rounds, so narrowing the screen to "last 5" narrows
+every average and leaves the handicap and anti-cap where they are. This was
+wrong at first, in two ways that shared a cause - the differentials were
+gathered after the window had been applied. "Last 5" computed an index from five
+rounds through the short-record table, and a stretch of rounds on unrated
+courses shrank the record rather than pushing it further back. The twenty is
+twenty *rated* rounds, not the rated ones among the last twenty played, and it
+is now gathered independently of the window in `differentialRecord`.
 
 **An unoffered window is a 400, not a clamp.** A client asking for something
 this endpoint does not do should be told, not quietly answered a different

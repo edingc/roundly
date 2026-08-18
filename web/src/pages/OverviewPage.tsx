@@ -309,6 +309,12 @@ function HandicapCard({ overview }: { overview: Overview }) {
           )}
         </div>
       </div>
+      {/* This card is the one thing on the screen the window selector does not
+          move, so it says so. An index is defined over the last twenty rated
+          rounds, not over whatever span is being looked at. */}
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Read from your most recent rated rounds — up to twenty — whatever window is showing.
+      </p>
       {/* Said plainly rather than buried: these are computed from gross scores,
           not the net-double-bogey-adjusted ones a governing body would use. */}
       <p className="text-xs text-slate-500 dark:text-slate-400">
